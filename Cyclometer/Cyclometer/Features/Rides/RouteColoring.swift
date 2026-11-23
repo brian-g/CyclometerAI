@@ -129,15 +129,24 @@ struct RouteColorScale: Equatable, Sendable {
 
     // MARK: Runs
 
-    /// The route as polylines of one band each. A run shorter than `RouteColoring.minimumRunMeters`
-    /// takes the band of the run before it (the first, of the run after it). Short runs in a row that
-    /// together pass it draw as one run, in the band they covered most of. Runs never join across a
-    /// pause: each stretch of riding starts its own.
+    /// The ride as polylines of one band each (`runs(bandedSegments:)`), one stretch of riding per
+    /// segment, so runs never join across a pause.
     func runs(_ track: RideMapTrack) -> [ColoredRun] {
-        track.segments.flatMap { segment -> [ColoredRun] in
+        Self.runs(bandedSegments: track.segments.map { segment in
+            segment.map { (coordinate: $0.coordinate, band: band($0)) }
+        })
+    }
+
+    /// A line, already banded point by point, as polylines of one band each: the ride's runs, and
+    /// S20's route colored by grade (#570). A run shorter than `RouteColoring.minimumRunMeters` takes
+    /// the band of the run before it (the first, of the run after it). Short runs in a row that
+    /// together pass it draw as one run, in the band they covered most of. Runs never join across
+    /// segments: each starts its own.
+    static func runs(bandedSegments: [[(coordinate: RouteCoordinate, band: Int?)]]) -> [ColoredRun] {
+        bandedSegments.flatMap { segment -> [ColoredRun] in
             var groups: [(band: Int?, points: [RouteCoordinate])] = []
             for point in segment {
-                let band = band(point)
+                let band = point.band
                 if let last = groups.indices.last, groups[last].band == band {
                     groups[last].points.append(point.coordinate)
                 } else {

@@ -44,7 +44,8 @@ private extension TrackPointDTO {
 }
 
 /// How the wind met the rider over a finished ride (#151): the share of moving time spent riding
-/// into it, across it and with it, for S15's Weather section.
+/// into it, across it and with it, for S15's Weather section. S20 quotes the same shares of a
+/// route's distance for a ride starting now (#570, `alongRoute`).
 enum RideWindExposure: Equatable, Sendable {
     /// Whole percents that add up to 100.
     case shares(headwind: Int, crosswind: Int, tailwind: Int)
@@ -62,20 +63,87 @@ enum RideWindExposure: Equatable, Sendable {
         guard !samples.isEmpty, !headings.isEmpty else { return nil }
         let samples = samples.sorted { $0.date < $1.date }
         var sampleIndex = 0
-        var head = 0, cross = 0, tail = 0
+        var legs: [Leg] = []
         for heading in headings {
             while sampleIndex + 1 < samples.count, samples[sampleIndex + 1].date <= heading.date {
                 sampleIndex += 1
             }
             let sample = samples[sampleIndex]
-            guard sample.windSpeedMPS >= Self.calmMPS else { continue }
-            switch RelativeWind(windFrom: sample.windFromDegrees, course: heading.degrees) {
-            case .headwind: head += 1
-            case .tailwind: tail += 1
-            case .crosswindFromLeft, .crosswindFromRight: cross += 1
+            legs.append(Leg(course: heading.degrees, windFromDegrees: sample.windFromDegrees,
+                            windSpeedMPS: sample.windSpeedMPS, weight: 1))
+        }
+        self.init(legs: legs)
+    }
+
+    /// How the forecast wind would meet a ride on a route (#570, S20's Weather): the share of the
+    /// route's *distance* into, across and with the wind, against the samples `WindSampling` placed
+    /// along it for a ride starting now. Each stretch of route takes the latest sample at or before
+    /// it by distance along the route (`WindSample.distanceMeters`), so an out-and-back's way home
+    /// takes the later hours' wind, not the wind over the same ground on the way out. The stretch
+    /// before the first sample takes the first. Nil with no samples, or a route too short to have a
+    /// bearing.
+    ///
+    /// The bearing is measured from the point at least `TimedHeading.baselineMeters` back, as a
+    /// ride's is, so a GPX's point-to-point jitter doesn't swing it.
+    static func alongRoute(_ coordinates: [RouteCoordinate], samples: [WindSample]) -> RideWindExposure? {
+        guard !samples.isEmpty, coordinates.count > 1 else { return nil }
+        let samples = samples.sorted { ($0.distanceMeters ?? 0) < ($1.distanceMeters ?? 0) }
+        let cumulative = RouteGeometry.cumulativeDistances(coordinates)
+        var sample = 0
+        var anchor = 0
+        var legs: [Leg] = []
+        for index in 1..<coordinates.count {
+            let here = coordinates[index]
+            while anchor + 1 < index,
+                  RouteGeometry.segmentMeters(from: coordinates[anchor + 1], to: here) >= TimedHeading.baselineMeters {
+                anchor += 1
+            }
+            while sample + 1 < samples.count, (samples[sample + 1].distanceMeters ?? 0) <= cumulative[index] {
+                sample += 1
+            }
+            guard RouteGeometry.segmentMeters(from: coordinates[anchor], to: here) >= TimedHeading.baselineMeters,
+                  let course = RouteGeometry.bearingDegrees(from: coordinates[anchor], to: here)
+            else { continue }
+            let reading = samples[sample].reading
+            let windFrom = reading.windDirection.converted(to: .degrees).value
+            let windSpeed = reading.windSpeed.converted(to: .metersPerSecond).value
+            // A non-finite reading says nothing of the wind, so its stretch is left out, as S15
+            // leaves out such a sample (`RideWeatherSample.init?`): `RelativeWind` would read a NaN
+            // direction as a tailwind.
+            guard windFrom.isFinite, windSpeed.isFinite else { continue }
+            legs.append(Leg(
+                course: course,
+                windFromDegrees: windFrom,
+                windSpeedMPS: windSpeed,
+                // Unrounded: a GPX with points under half a metre apart would weigh nothing in
+                // whole metres, and read as calm.
+                weight: cumulative[index] - cumulative[index - 1]
+            ))
+        }
+        guard !legs.isEmpty else { return nil }
+        return RideWindExposure(legs: legs)
+    }
+
+    /// One stretch of riding against the wind over it, weighed by `weight`: 1 for a second of a
+    /// ride, its length in metres for a stretch of route.
+    private struct Leg {
+        var course: Double
+        var windFromDegrees: Double
+        var windSpeedMPS: Double
+        var weight: Double
+    }
+
+    /// The shares over `legs`, leaving out those under a calm wind; `.calm` when that is all of them.
+    private init(legs: [Leg]) {
+        var head = 0.0, cross = 0.0, tail = 0.0
+        for leg in legs where leg.windSpeedMPS >= Self.calmMPS {
+            switch RelativeWind(windFrom: leg.windFromDegrees, course: leg.course) {
+            case .headwind: head += leg.weight
+            case .tailwind: tail += leg.weight
+            case .crosswindFromLeft, .crosswindFromRight: cross += leg.weight
             }
         }
-        // Every heading falls under some sample, so none counted means every one was calm.
+        // Every leg falls under some sample, so none counted means every one was calm.
         guard head + cross + tail > 0 else {
             self = .calm
             return
@@ -85,11 +153,11 @@ enum RideWindExposure: Equatable, Sendable {
     }
 
     /// Largest-remainder rounding, so the three shares always add up to 100. Ties go to the
-    /// earlier count.
-    static func wholePercents(_ counts: [Int]) -> [Int] {
+    /// earlier count. Weights, not whole counts: S20's are metres of route.
+    static func wholePercents(_ counts: [Double]) -> [Int] {
         let total = counts.reduce(0, +)
         guard total > 0 else { return counts.map { _ in 0 } }
-        let exact = counts.map { Double($0) * 100 / Double(total) }
+        let exact = counts.map { $0 * 100 / total }
         var percents = exact.map { Int($0.rounded(.down)) }
         let order = exact.indices.sorted { lhs, rhs in
             let left = exact[lhs] - Double(percents[lhs]), right = exact[rhs] - Double(percents[rhs])

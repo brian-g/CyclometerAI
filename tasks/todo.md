@@ -3121,3 +3121,53 @@ Scope: the branch's own commits (`cde1111`, `393484b`). The local `origin/HEAD` 
 - [ ] Brian runs it
 - [ ] Re-record the S10 snapshots on "Cyclometer Tests" (Time now 1:58:20; new stats-unavailable references);
   `RideDetailSnapshotTests` must pass unchanged; full `CyclometerTests` (`RideSummarySection` is shared)
+
+---
+
+## #570 — S20 Route Detail mirrors S15 Ride Detail (M10.9)
+
+Plan approved 2026-11-22. Weather: ranges + wind shares, no Foundation Models summary (follow-up issue).
+Elevation mirrors S15 (Ascent / Descent / Steepest; Max Grade leaves Summary). Header: route, flags, arrows; no wind.
+
+- [x] Shared map header (`UI/Components/MapHeader/`): `MapHeaderChrome`, `.mapHeader(…)`, `MapHeaderTapRow`,
+      `MapHeaderToolbarTitle`, `.tracksTitleUnderToolbar(…)`; S15 switched over
+- [x] S20 layout: header, title block (name + distance hero), sections in order, toolbar chrome; Distance row gone
+- [x] `RouteHeaderMap`: tight framing, flags + arrows, no interaction
+- [x] `RouteMapSheetFeature` + `RouteMapSheet`: basemap (shared pref), Wind layer, Color Route By Plain/Grade, legend
+- [x] `RouteColorScale.runs(bandedSegments:)`; `RouteGradeBands` from `RouteTerrain.gradeProfile`;
+      `RouteMapContent.coloredRuns`
+- [x] `RouteDetailFeature` wiring: `mapSheet`, `mapTapped`, open sheet's wind kept current, failure clears wind
+- [x] Elevation section: chart + Ascent / Descent / Steepest heroes (via `ElevationMetrics`); Max Grade out of Summary
+- [x] Weather: ranges over the strip's hours; `RideWindExposure.alongRoute` timed by `WindSample.distanceMeters`
+      (new, from `WindSamplePoint`); shared `WeatherSummaryRows`
+- [x] W10's wind map keeps 220 pt as `WeatherMap.height` (it borrowed `RouteDetailView.mapHeight`)
+- [x] Specs: UX.md §S20 as-built, §W10/§S19 pointers, PRD §7 row + 0.6.25; follow-up #651 (FM weather summary)
+- [x] App and test target build
+- [x] Brian runs it ("looks great")
+- [x] S20 references re-recorded on "Cyclometer Tests" and looked at (none flat); `RideDetailSnapshotTests` 9/9
+      unchanged
+- [x] Grade test corrected: a climb starting at the route's start reads a band shallower for its first metres (the
+      100 m window is one-sided there, as for Max Grade); asserts band 4 over ≥ 90 % instead of one run
+- [x] Full `CyclometerTests` after merging #649: 2726 passed, 2 failed. `RouteWindFeatureTests/loadsInRouteOrder`
+      expected samples without `distanceMeters` (fixed; 9/9 on a fresh build). `testRideDashboardBanner` passed alone
+      4/4 (key-window cold-start flake, untouched code)
+- [x] #649 landed mid-branch: merged; `RouteDetailSnapshotTests`' shared helper now passes `.snapshot(…)`, so the new
+      cases do too
+
+---
+
+## #570 review (`/code-review --fix`, xhigh)
+
+- [x] One-point route (no length, one coordinate): `hasHeader = drawsMap || distanceMeters > 0`, as S15 keeps the room
+      whenever it has a track
+- [x] Wind shares weighed in unrounded metres (`wholePercents` takes `[Double]`): a GPX with points under 0.5 m apart
+      read as calm. S15's seconds weigh 1.0, so its shares are unchanged
+- [x] Non-finite wind readings skipped in `alongRoute` (a NaN direction read as tailwind), as S15 drops such samples
+- [x] Header arrows keep the camera's last bounds; the route-rect seed only applies until the camera reports, so a
+      return from S15 doesn't re-place them narrower
+- [x] Stale doc comments: `coordinates`, `wind`, `RouteSummarySection`, `WindSample.distanceMeters`
+- [x] **Decided (Brian): accepted.** A failed route read (or an undecodable polyline) keeps a blank half-screen band
+      above the title for good. Recorded as an accepted gap in UX.md §S20; no follow-up issue
+- [x] Targeted run on "Cyclometer Tests", fresh DerivedData: 84 passed, 0 failed (RouteWindExposure 5,
+      RouteMapSheetFeature 5, RouteGradeBands 3, RouteDetailMapSheet 6, RouteDetailFeature 17, RouteWindFeature 9,
+      RideDetailFeature 14, RideDetailSnapshot 9, RouteDetailSnapshot 11, MapHeaderChrome 5)

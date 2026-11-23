@@ -70,46 +70,64 @@ struct RideWeatherSection: View {
     let summary: RideWeatherSummary
     let attribution: WeatherSourceAttribution?
 
-    @Environment(\.locale) private var locale
-
     var body: some View {
         Section {
-            ReadingColumns {
-                if let temperature = summary.temperature(in: UnitTemperature(forLocale: locale, usage: .weather)) {
-                    ReadingColumn("Temperature", temperature)
-                }
-                if let humidity = summary.humidity {
-                    ReadingColumn("Humidity", humidity)
-                }
-                if summary.exposure == .calm {
-                    ReadingColumn("Wind", MetricReading(value: "Calm", spoken: "Calm"))
-                }
-            }
-            if case let .shares(headwind, crosswind, tailwind) = summary.exposure {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    WindShareBar(shares: [
-                        (headwind, RideWindShareColor.headwind),
-                        (crosswind, RideWindShareColor.crosswind),
-                        (tailwind, RideWindShareColor.tailwind),
-                    ])
-                    ReadingColumns {
-                        ReadingColumn("Headwind", shareReading(headwind, name: "headwind")) {
-                            ZoneDot(color: RideWindShareColor.headwind)
-                        }
-                        ReadingColumn("Crosswind", shareReading(crosswind, name: "crosswind")) {
-                            ZoneDot(color: RideWindShareColor.crosswind)
-                        }
-                        ReadingColumn("Tailwind", shareReading(tailwind, name: "tailwind")) {
-                            ZoneDot(color: RideWindShareColor.tailwind)
-                        }
-                    }
-                }
-            }
+            WeatherSummaryRows(summary: summary)
         } header: {
             Text("Weather")
         } footer: {
             if let attribution {
                 WeatherAttributionFooter(attribution: attribution)
+            }
+        }
+    }
+}
+
+/// The ranges and the wind shares as list rows: S15's Weather over a ride's recorded conditions
+/// (#151), and S20's over a ride starting now on the route (#570). The temperature and humidity in
+/// one row, then, with a wind worth naming, a bar of the shares into, across and with it, keyed by
+/// whole percents. "Calm" joins the first row when every wind was too light to have a direction.
+struct WeatherSummaryRows: View {
+    let summary: RideWeatherSummary
+
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        let temperature = summary.temperature(in: UnitTemperature(forLocale: locale, usage: .weather))
+        let humidity = summary.humidity
+        let isCalm = summary.exposure == .calm
+        // No empty row on S20 before the hours a ride would see are known.
+        if temperature != nil || humidity != nil || isCalm {
+            ReadingColumns {
+                if let temperature {
+                    ReadingColumn("Temperature", temperature)
+                }
+                if let humidity {
+                    ReadingColumn("Humidity", humidity)
+                }
+                if isCalm {
+                    ReadingColumn("Wind", MetricReading(value: "Calm", spoken: "Calm"))
+                }
+            }
+        }
+        if case let .shares(headwind, crosswind, tailwind) = summary.exposure {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                WindShareBar(shares: [
+                    (headwind, RideWindShareColor.headwind),
+                    (crosswind, RideWindShareColor.crosswind),
+                    (tailwind, RideWindShareColor.tailwind),
+                ])
+                ReadingColumns {
+                    ReadingColumn("Headwind", shareReading(headwind, name: "headwind")) {
+                        ZoneDot(color: RideWindShareColor.headwind)
+                    }
+                    ReadingColumn("Crosswind", shareReading(crosswind, name: "crosswind")) {
+                        ZoneDot(color: RideWindShareColor.crosswind)
+                    }
+                    ReadingColumn("Tailwind", shareReading(tailwind, name: "tailwind")) {
+                        ZoneDot(color: RideWindShareColor.tailwind)
+                    }
+                }
             }
         }
     }

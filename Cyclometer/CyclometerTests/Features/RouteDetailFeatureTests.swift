@@ -214,10 +214,15 @@ struct RouteDetailFeatureTests {
         #expect(points.count >= WindSampling.minimumSamples)
         // The first sample is the route's own start point, elevation and all; the rest are the
         // points ahead.
-        #expect(store.state.wind.samples.first == WindSample(coordinate: detail.coordinates[0], reading: .fixture))
+        #expect(store.state.wind.samples.first
+                == WindSample(coordinate: detail.coordinates[0], reading: .fixture, distanceMeters: 0))
         #expect(store.state.wind.samples.dropFirst().map(\.coordinate) == points.dropFirst().map(\.coordinate))
+        // Each knows how far along the route it is, which times the Weather section's shares (#570).
+        #expect(store.state.wind.samples.dropFirst().map(\.distanceMeters) == points.dropFirst().map(\.distanceMeters))
         // One request per sample: the start's forecast is the first, not asked for again.
         #expect(asked.value.count == points.count)
+        #expect(store.state.windExposure != nil)
+        #expect(store.state.windExposure == RideWindExposure.alongRoute(detail.coordinates, samples: store.state.wind.samples))
     }
 
     @Test("With no forecast at the start there is no wind")
@@ -304,6 +309,7 @@ struct RouteDetailFeatureTests {
 
         #expect(store.state.weather == .unavailable(.failed))
         #expect(store.state.wind.samples.isEmpty)
+        #expect(store.state.windExposure == nil, "no wind, no shares (#570)")
     }
 
     /// A failed read leaves the screen on what it already shows, Previous Rides included.

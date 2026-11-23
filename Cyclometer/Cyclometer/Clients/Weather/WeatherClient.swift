@@ -131,7 +131,7 @@ extension WeatherClient {
         await forecasts(at: points).compactMap { answer in
             WindSampling.reading(
                 at: answer.point.arrival, current: answer.forecast.current, hourly: answer.forecast.hourly
-            ).map { WindSample(coordinate: answer.point.coordinate, reading: $0) }
+            ).map { WindSample(coordinate: answer.point.coordinate, reading: $0, distanceMeters: answer.point.distanceMeters) }
         }
     }
 }

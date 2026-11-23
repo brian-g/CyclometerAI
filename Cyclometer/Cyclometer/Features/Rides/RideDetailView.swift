@@ -54,7 +54,7 @@ struct RideDetailList<MapHeader: View>: View {
     private var hasHeader: Bool { store.reservesMapHeader }
     /// The map itself, once there is a track to draw.
     private var drawsMap: Bool { !store.trackSegments.isEmpty }
-    private var mapHeight: CGFloat { (screenHeight * RideDetailHeaderChrome.mapHeightFraction).rounded() }
+    private var mapHeight: CGFloat { MapHeaderChrome.mapHeight(screenHeight: screenHeight) }
     /// A ride S10 never named — recorded before #249, or closed out at launch — has a "" `title`.
     /// `RideRow`'s fallback.
     private var title: String { store.summary.title.isEmpty ? "Ride" : store.summary.title }
@@ -63,29 +63,10 @@ struct RideDetailList<MapHeader: View>: View {
         List {
             Section {
                 if hasHeader {
-                    // Clear, so the map behind shows through. The title block starts where the
-                    // map starts to fade (UX.md §S15).
-                    Button { store.send(.mapTapped) } label: {
-                        Color.clear
-                            .frame(height: mapHeight - Spacing.mapHeaderFade)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!drawsMap)
-                    .accessibilityHidden(!drawsMap)
-                    .accessibilityLabel("Route map")
-                    .accessibilityHint("Opens the map full screen")
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                    MapHeaderTapRow(height: mapHeight, isEnabled: drawsMap) { store.send(.mapTapped) }
                 }
-                // The answer, not the frame, so the action runs only when it flips.
                 RideTitleBlock(store: store, title: title)
-                    .onGeometryChange(for: Bool.self) { [toolbarBottom] proxy in
-                        RideDetailHeaderChrome.isTitleUnderToolbar(
-                            titleBottom: proxy.frame(in: .global).maxY, toolbarBottom: toolbarBottom
-                        )
-                    } action: { isTitleUnderToolbar = $0 }
+                    .tracksTitleUnderToolbar(toolbarBottom, isUnder: $isTitleUnderToolbar)
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             }
@@ -120,24 +101,15 @@ struct RideDetailList<MapHeader: View>: View {
         // The list draws over the map, so its own background is the map's surround instead.
         .scrollContentBackground(.hidden)
         .contentMargins(.top, hasHeader ? 0 : nil, for: .scrollContent)
-        .modifier(RideMapHeaderBackground(hasHeader: hasHeader, drawsMap: drawsMap, height: mapHeight,
-                                          toolbarBottom: toolbarBottom, header: mapHeader))
+        .mapHeader(hasHeader: hasHeader, drawsMap: drawsMap, height: mapHeight, toolbarBottom: toolbarBottom,
+                   header: mapHeader)
         // The title the next screen's back button carries. The bar shows `principal` instead.
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .toolbar {
-            // In once the title block's name has scrolled under the bar: a fade and a short rise,
-            // as S14's inline title comes in when its large title scrolls away. Always laid out,
-            // so the bar never resizes the item — inserting it revealed it from the centre.
             ToolbarItem(placement: .principal) {
-                Text(title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .opacity(isTitleUnderToolbar ? 1 : 0)
-                    .offset(y: isTitleUnderToolbar ? 0 : Spacing.sm)
-                    .animation(.smooth(duration: 0.25), value: isTitleUnderToolbar)
-                    .accessibilityHidden(!isTitleUnderToolbar)
+                MapHeaderToolbarTitle(title: title, isShown: isTitleUnderToolbar)
             }
             // Absent when the finish's GPX export failed, or the rider deleted the file.
             if let url = store.stats?.gpxFileURL {
@@ -174,77 +146,6 @@ extension RideDetailList where MapHeader == RideHeaderMap {
 }
 
 // MARK: - Header
-
-/// The map behind the list, and the scroll that moves it (#538). A modifier holding the offset as
-/// its own state, so a scroll frame re-runs this body alone: the list is its `content`, which a
-/// change here doesn't rebuild. View state, not store state: it changes every frame of a scroll
-/// and only the chrome reads it.
-private struct RideMapHeaderBackground<Header: View>: ViewModifier {
-    /// The list runs under the top safe area, with room kept for the header.
-    let hasHeader: Bool
-    /// The track has loaded, so the map draws in that room.
-    let drawsMap: Bool
-    let height: CGFloat
-    let toolbarBottom: CGFloat
-    let header: Header
-
-    /// How far the list has scrolled (`RideDetailHeaderChrome`).
-    @State private var scrollOffset: CGFloat = 0
-
-    func body(content: Content) -> some View {
-        content
-            .background(alignment: .top) {
-                ZStack(alignment: .top) {
-                    Color(.systemGroupedBackground)
-                    if drawsMap {
-                        RideMapHeaderFrame(height: height, toolbarBottom: toolbarBottom, offset: scrollOffset,
-                                           content: header)
-                            .transition(.opacity)
-                    }
-                }
-                // In with the track rather than popping in over the room kept for it.
-                .animation(.easeIn(duration: 0.25), value: drawsMap)
-                .ignoresSafeArea()
-            }
-            // Under the top safe area only with a map to run under it. Without one, the title
-            // block is the first thing below the toolbar.
-            .ignoresSafeArea(edges: hasHeader ? .top : [])
-            .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, offset in
-                scrollOffset = offset
-            }
-    }
-}
-
-/// The map header's frame (#538): pinned to the top of the screen, `height` tall, its bottom
-/// `Spacing.mapHeaderFade` fading to the page. It rides up with the list and fades as it goes,
-/// and stretches from the top when the rider pulls down past it.
-private struct RideMapHeaderFrame<Content: View>: View {
-    let height: CGFloat
-    let toolbarBottom: CGFloat
-    let offset: CGFloat
-    let content: Content
-
-    var body: some View {
-        content
-            // The route fits between the toolbar and the start of the title area (UX.md §S15).
-            .safeAreaPadding(.top, toolbarBottom)
-            .safeAreaPadding(.bottom, Spacing.mapHeaderFade)
-            .frame(height: height)
-            .mask {
-                VStack(spacing: 0) {
-                    Rectangle()
-                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-                        .frame(height: Spacing.mapHeaderFade)
-                }
-            }
-            .scaleEffect(RideDetailHeaderChrome.mapStretch(offset: offset, mapHeight: height), anchor: .top)
-            .offset(y: -max(offset, 0))
-            .opacity(RideDetailHeaderChrome.mapOpacity(offset: offset, mapHeight: height, fade: Spacing.mapHeaderFade))
-            // The clear row in the list above it takes the taps.
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-    }
-}
 
 /// The title over the map's fade (UX.md §S15): the ride's name, its date and time range, the
 /// rider's notes, then distance and moving time in small heroes.
