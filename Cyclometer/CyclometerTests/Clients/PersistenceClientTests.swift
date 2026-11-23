@@ -610,12 +610,15 @@ struct PersistenceClientTests {
             rideId: withoutSensors, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
         ), nil)
 
-        // A real 0 rpm average must survive as 0, not collapse into "no sensor".
+        // A real 0 rpm average must survive as 0, not collapse into "no sensor". Finalized without
+        // finish stats, both are owed them, as S10 reads (#650).
         #expect(try await client.fetchRideStats(withSensors) == RideStats(
             averageSpeedMPS: 4, maxSpeedMPS: 9, averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3,
-            title: "", endedAt: endedAt
+            isFinishStatsOwed: true, title: "", endedAt: endedAt
         ))
-        #expect(try await client.fetchRideStats(withoutSensors) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, title: "", endedAt: endedAt))
+        #expect(try await client.fetchRideStats(withoutSensors) == RideStats(
+            averageSpeedMPS: 3, maxSpeedMPS: 5, isFinishStatsOwed: true, title: "", endedAt: endedAt
+        ))
     }
 
     @Test("fetchRideStats carries the stored title, so an S15 reloading after a rename shows it (#538)")
@@ -866,12 +869,15 @@ struct PersistenceClientTests {
             rideId: closedOut, startedAt: startedAt, distanceMeters: 21_000, movingSeconds: 3_300
         )])
         #expect(try await client.fetchRideStats(inProgress).ascentMeters == nil)
+        // What S10 reads to wait for the backfill (#650).
+        #expect(try await client.fetchRideStats(closedOut).isFinishStatsOwed)
 
         try await client.saveRideFinishStats(closedOut, RideFinishStats(
             ascentMeters: 120, descentMeters: 118, activeKilocalories: 610
         ))
         #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
         #expect(try await client.fetchRideStats(closedOut).activeKilocalories == 610)
+        #expect(try await client.fetchRideStats(closedOut).isFinishStatsOwed == false)
     }
 
     // MARK: - Rename (#249, for S10)

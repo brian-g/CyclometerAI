@@ -28,6 +28,9 @@ struct RideStats: Sendable, Equatable {
     var activeKilocalories: Double? = nil
     /// W23's series, stored with the total (#536): nil exactly when it is.
     var calorieSeries: [CaloriePoint]? = nil
+    /// The ride is still waiting on `RideFinishStats.backfill` for the four above (`Ride.isFinishStatsOwed`), so their
+    /// nils don't yet mean "not recorded". S10 reads again until they're stored (#650).
+    var isFinishStatsOwed: Bool = false
     /// W3's moving seconds (`Ride.speedSampleCount`), for the Time section (#536).
     var movingSeconds: Int = 0
     /// W5's time at each whole rpm and time coasting (#340), for the Cadence sections (#536);
