@@ -3168,5 +3168,6 @@ Elevation mirrors S15 (Ascent / Descent / Steepest; Max Grade leaves Summary). H
 - [x] Stale doc comments: `coordinates`, `wind`, `RouteSummarySection`, `WindSample.distanceMeters`
 - [ ] **Decide (Brian):** a failed route read (or an undecodable polyline) keeps a blank half-screen band above the
       title for good. S15 gives the room back on `trackReadFailed`; S20 would need a `routeUnavailable` action or flag
-- [ ] Targeted run: `RouteWindExposureTests`, `RouteMapSheetFeatureTests`, `RouteDetailMapSheetTests`,
-      `RouteDetailFeatureTests`, `RideDetailFeatureTests` (S15's shares), `RouteDetailSnapshotTests`
+- [x] Targeted run on "Cyclometer Tests", fresh DerivedData: 84 passed, 0 failed (RouteWindExposure 5,
+      RouteMapSheetFeature 5, RouteGradeBands 3, RouteDetailMapSheet 6, RouteDetailFeature 17, RouteWindFeature 9,
+      RideDetailFeature 14, RideDetailSnapshot 9, RouteDetailSnapshot 11, MapHeaderChrome 5)
