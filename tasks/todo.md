@@ -2980,7 +2980,7 @@ led by Distance and Time, with Route as its own section. S10 is now Map · Name 
   the snapshot seeding updated. The app and test targets build
 - [x] UX.md §S10 and §S15 updated. Calories now show on S10
 - [ ] Brian runs it: finish a ride
-- [ ] Re-record the 6 `RideSummarySnapshotTests` references. S15's `RideDetail*SnapshotTests` must pass unchanged
+- [x] Re-record the 6 `RideSummarySnapshotTests` references. S15's `RideDetail*SnapshotTests` must pass unchanged
 - [ ] Full `CyclometerTests` (`RideDetailView` is a shared path), then commit and open a PR
 
 **Follow-up (Brian): Notes on S10.** The Name row is now **Title**, followed by a **Notes** section. Both are labelled
@@ -2989,6 +2989,9 @@ above their fields, as in S15's Edit sheet (`RideEditView`). `RideSummaryFeature
 `.rideSummary(.dismiss)` writes the notes first, then the rename, which is followed by the S14 reload and GPX rewrite
 only when the title changed. New tests: 3 in `RideSummaryFeatureTests` and 2 in `RideSummaryPresentationTests`. The
 test build succeeds.
+
+---
+
 ## #643 Auto-resume waits for a frozen wheel sensor
 
 **Log check.** At 12:59 the fix accuracy was 9.5–11 m, not the 2 m the issue assumed: the recording gate flapped at
@@ -3062,3 +3065,24 @@ All four new tests failed on the unfixed reducer. Full `CyclometerTests`: TEST S
 - [x] Revert checks: bar at 1.0 → walking cases fail; no veto suspension → both replays fail; finding 1 reverted →
       the coasting test fails
 - [x] Full `CyclometerTests`: 3100 passed, 0 failures
+
+---
+
+## #645 review (`/code-review xhigh --fix`)
+
+Scope: the branch's own commits (`cde1111`, `393484b`). The local `origin/HEAD` is behind remote main, so
+`origin/HEAD...HEAD` also pulled in #644, which is already merged and was left out.
+
+- [x] `notesAndRename` now records both writes in order: `["notes Legs gone", "rename Hill Repeats"]`. Before, it
+  passed even with the notes write deleted. `RideSummaryPresentationTests`: 9/9
+- [x] `RideSummaryFeature.fetchStats` doc: a failed read no longer leaves dashes; the Summary shows Distance and Time
+  alone
+- [x] UX.md §S10 Delete: closes without saving the name or the notes
+- [x] This file: the #645 section had no `---` before #643 (merge artifact), and its re-record item is done (`393484b`)
+- [ ] **Decide (Brian):** S10's Time is `durationSeconds` (S15's "Ride Time"), but the code comment and UX.md §S10 say
+  S15 shows it in its title block. That block shows moving time. Either show moving time, or label it "Ride Time" and
+  fix the comment and UX text
+- [ ] **Decide (Brian):** a ride finalized without live finish stats gets them from `RideFinishStats.backfill()`, which
+  starts after the finalize. S10 reads its stats once, so it shows no Ascent, Descent or Calories for that ride
+- [ ] **Check:** UX.md §S10 and `RideSummaryView`'s doc still say the frame's Description row isn't built. If Notes is
+  that row, update both

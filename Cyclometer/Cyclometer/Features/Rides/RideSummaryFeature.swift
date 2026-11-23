@@ -308,7 +308,7 @@ struct RideSummaryFeature {
         return storedTitle.isEmpty || storedTitle == defaultTitle
     }
 
-    /// Nil on failure, leaving the stats rows as dashes — logged, as S15 does.
+    /// Nil on failure, leaving the Summary with Distance and Time alone — logged, as S15 does.
     private static func fetchStats(_ id: UUID, _ persistenceClient: PersistenceClient) async -> RideStats? {
         do {
             return try await persistenceClient.fetchRideStats(id)

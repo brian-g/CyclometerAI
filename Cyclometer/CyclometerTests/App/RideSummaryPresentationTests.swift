@@ -179,18 +179,21 @@ struct RideSummaryPresentationTests {
         #expect(replaced.value == 0)
     }
 
-    @Test("a rename and notes both land; a failed notes write doesn't stop the rename (#645)")
+    @Test("the notes are written before the rename; a failed notes write doesn't stop the rename (#645)")
     func notesAndRename() async {
-        let renamed = LockIsolated<[String]>([])
-        var client = PersistenceClient.mock(onRenameRide: { _, title in renamed.withValue { $0.append(title) } })
-        client.updateRideNotes = { _, _ in throw PersistenceError.rideNotFound }
+        let writes = LockIsolated<[String]>([])
+        var client = PersistenceClient.mock(onRenameRide: { _, title in writes.withValue { $0.append("rename \(title)") } })
+        client.updateRideNotes = { _, notes in
+            writes.withValue { $0.append("notes \(notes)") }
+            throw PersistenceError.rideNotFound
+        }
         let store = makeStore(presenting(title: "Hill Repeats", notes: "Legs gone"), persistenceClient: client)
         store.exhaustivity = .off
 
         await store.send(.rideSummary(.dismiss))
         await store.receive(\.rides.reloadRides)
 
-        #expect(renamed.value == ["Hill Repeats"])
+        #expect(writes.value == ["notes Legs gone", "rename Hill Repeats"])
     }
 
     /// A rename typed before deleting must not be written to a ride that's going (#452).
