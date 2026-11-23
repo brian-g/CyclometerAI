@@ -385,16 +385,23 @@ struct RideSummaryReadingsTests {
         #expect(RideStats(averageSpeedMPS: 0, maxSpeedMPS: 0).summaryReadings(.metric).isEmpty)
     }
 
-    @Test("S10 leads with distance, then the ride's time without pauses")
+    @Test("S10 leads with distance, then moving time, as S15's title block shows it")
     func s10LeadingReadings() {
         let summary = RideListSummary(id: UUID(), title: "", startedAt: .now,
                                       distanceMeters: 52_000, durationSeconds: 7_265)
-        #expect(summary.leadingReadings(.metric) == [
+        #expect(summary.leadingReadings(.metric, movingSeconds: 7_100) == [
             SummaryReading(label: "Distance", reading: MetricReading(value: "52.0", unit: "km",
                                                                      spoken: UnitSystem.metric.spokenDistance(fromMeters: 52_000))),
-            SummaryReading(label: "Time", reading: MetricReading(value: "2:01:05", spoken: 7_265.spokenElapsed)),
+            SummaryReading(label: "Time", reading: MetricReading(value: "1:58:20", spoken: 7_100.spokenElapsed)),
         ])
-        #expect(summary.leadingReadings(.imperial)[0].reading.value == "32.3")
-        #expect(summary.leadingReadings(.imperial)[0].reading.unit == "mi")
+        #expect(summary.leadingReadings(.imperial, movingSeconds: 7_100)[0].reading.value == "32.3")
+        #expect(summary.leadingReadings(.imperial, movingSeconds: 7_100)[0].reading.unit == "mi")
+    }
+
+    @Test("without the stats, Time falls back to the ride's time without pauses")
+    func s10TimeWithoutStats() {
+        let summary = RideListSummary(id: UUID(), title: "", startedAt: .now,
+                                      distanceMeters: 52_000, durationSeconds: 7_265)
+        #expect(summary.leadingReadings(.metric, movingSeconds: nil)[1].reading.value == "2:01:05")
     }
 }

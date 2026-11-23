@@ -4,9 +4,10 @@ import SwiftUI
 /// S10 — Ride Summary, presented as a sheet by `AppFeature` when a ride is finished (#249).
 ///
 /// The Design.sketch S10 frame's structure — map, a grouped list, a floating button — carrying
-/// UX.md §S10's content: S15's Summary, led by distance and time (#645). The frame's Description,
-/// Bike and Sync To rows are not built: Sync is Phase 2, and there is no bike model. This view
-/// owns only the loading, which a snapshot must not run; the screen itself is `RideSummaryList`.
+/// UX.md §S10's content: S15's Summary, led by distance and time (#645). The frame's Description
+/// row is the Notes field (#645). Its Bike and Sync To rows are not built: Sync is Phase 2, and
+/// there is no bike model. This view owns only the loading, which a snapshot must not run; the
+/// screen itself is `RideSummaryList`.
 struct RideSummaryView: View {
     @Bindable var store: StoreOf<RideSummaryFeature>
 
@@ -68,7 +69,12 @@ struct RideSummaryList<MapRow: View>: View {
             case .loaded:
                 // S15's Summary (#645), led by what S15 shows in its title block. A plain passes
                 // row: S10 has no passes sheet.
-                RideSummarySection(stats: store.stats, unit: unit, leading: store.summary?.leadingReadings(unit) ?? []) { passes in
+                RideSummarySection(
+                    stats: store.stats, unit: unit,
+                    leading: store.summary?.leadingReadings(unit, movingSeconds: store.stats?.movingSeconds) ?? [],
+                    // The stats read failed: say so, rather than a Summary that looks complete.
+                    note: store.stats == nil ? "The rest of this ride's stats couldn't be loaded" : nil
+                ) { passes in
                     LabeledContent("Vehicle Passes", value: passes.formatted())
                 }
                 // As S15 shows a route: here without a link, since S10 isn't on the Rides stack.
@@ -141,9 +147,11 @@ extension RideSummaryList where MapRow == RideMapView {
 
 extension RideListSummary {
     /// S10's Summary leads with these (#645), ahead of S15's readings: S15 shows them in its
-    /// title block instead. Time is the ride's with pauses left out, `Ride.durationSeconds`.
-    func leadingReadings(_ unit: UnitSystem) -> [SummaryReading] {
-        let seconds = Int(durationSeconds)
+    /// title block instead. Time is moving time, W3's, as S15's title block and Avg Speed use;
+    /// `movingSeconds` is nil when the stats didn't load, and then it falls back to the ride's
+    /// time with pauses left out.
+    func leadingReadings(_ unit: UnitSystem, movingSeconds: Int?) -> [SummaryReading] {
+        let seconds = movingSeconds ?? Int(durationSeconds)
         return [
             SummaryReading(label: "Distance", reading: MetricReading(
                 value: unit.distance(fromMeters: distanceMeters).formatted(.number.precision(.fractionLength(1))),

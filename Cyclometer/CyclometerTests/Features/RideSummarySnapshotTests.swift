@@ -41,7 +41,7 @@ final class RideSummarySnapshotTests: XCTestCase {
 
     /// Imperial units, and the state `.task` would have produced seeded directly.
     private func screen(
-        stats: RideStats,
+        stats: RideStats?,
         pairedSensors: [PairedSensor] = [],
         sensorHealth: [UUID: SensorHealthReport] = [:]
     ) -> some View {
@@ -118,6 +118,12 @@ final class RideSummarySnapshotTests: XCTestCase {
         assertBothSchemes(screen(stats: RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, ascentMeters: 412,
                                                   descentMeters: 398, movingSeconds: 7_100)),
                           named: "gps-only")
+    }
+
+    /// The stats read failed: Distance and Time from the ride's row, and a row saying the rest
+    /// didn't load (#645 review).
+    func testRideSummaryStatsUnavailable() {
+        assertBothSchemes(screen(stats: nil), named: "stats-unavailable")
     }
 
     /// The ride flagged two devices (#391): a sagging combo CSC sensor, listed once with both its

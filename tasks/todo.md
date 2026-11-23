@@ -3086,3 +3086,15 @@ Scope: the branch's own commits (`cde1111`, `393484b`). The local `origin/HEAD` 
   starts after the finalize. S10 reads its stats once, so it shows no Ascent, Descent or Calories for that ride
 - [ ] **Check:** UX.md §S10 and `RideSummaryView`'s doc still say the frame's Description row isn't built. If Notes is
   that row, update both
+
+**Review decisions (Brian).**
+- Time is moving time: `RideListSummary.leadingReadings(_:movingSeconds:)`, which falls back to the ride's time without
+  pauses when the stats didn't load
+- Missing finish stats after a resumed ride: filed as #650
+- A failed stats read shows "The rest of this ride's stats couldn't be loaded" under Distance and Time
+  (`RideSummarySection.note`), with a new `testRideSummaryStatsUnavailable` snapshot
+- Notes is the Sketch frame's Description row (view doc comment, UX.md §S10)
+- Title row tap area: left as is
+- [ ] Brian runs it
+- [ ] Re-record the S10 snapshots on "Cyclometer Tests" (Time now 1:58:20; new stats-unavailable references);
+  `RideDetailSnapshotTests` must pass unchanged; full `CyclometerTests` (`RideSummarySection` is shared)

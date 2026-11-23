@@ -13,12 +13,14 @@ struct RideSummarySection<PassesRow: View>: View {
     let unit: UnitSystem
     /// Readings ahead of S15's, S10's Distance and Time (#645).
     var leading: [SummaryReading] = []
+    /// A row under the readings in secondary text, for S10 to say its stats didn't load.
+    var note: String? = nil
     @ViewBuilder let passesRow: (Int) -> PassesRow
 
     var body: some View {
         let readings = leading + (stats?.summaryReadings(unit) ?? [])
         let passes = stats?.vehiclePassCount
-        if !readings.isEmpty || passes != nil {
+        if !readings.isEmpty || passes != nil || note != nil {
             Section("Summary") {
                 if !readings.isEmpty {
                     ReadingColumns {
@@ -26,6 +28,9 @@ struct RideSummarySection<PassesRow: View>: View {
                             ReadingColumn(item.label, item.reading)
                         }
                     }
+                }
+                if let note {
+                    Text(note).foregroundStyle(Color.cyTextSecondary)
                 }
                 // Absent with no radar paired, where "0 passes" would be a claim nobody measured.
                 if let passes {
