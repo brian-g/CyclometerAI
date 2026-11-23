@@ -3171,3 +3171,62 @@ Elevation mirrors S15 (Ascent / Descent / Steepest; Max Grade leaves Summary). H
 - [x] Targeted run on "Cyclometer Tests", fresh DerivedData: 84 passed, 0 failed (RouteWindExposure 5,
       RouteMapSheetFeature 5, RouteGradeBands 3, RouteDetailMapSheet 6, RouteDetailFeature 17, RouteWindFeature 9,
       RideDetailFeature 14, RideDetailSnapshot 9, RouteDetailSnapshot 11, MapHeaderChrome 5)
+
+---
+
+## #646 — a ride longer than 4 days crashed the HealthKit workout write
+
+HealthKit raises an uncatchable Objective-C exception on a sample over its type's `maximumAllowedDuration`.
+Probed on iOS 27: the workout, its route, distance and active energy are all capped at 345,600 s, so
+`HKWorkoutBuilder`'s workout is capped too, not only the samples.
+
+- [x] `HealthKitClient.checkSpan(from:to:)`: one guard for both uncatchable spans, ends-before-start and
+      over-limit, read from each type's own limit (`workoutSpanTypes`). `saveWorkout` calls it before building
+      anything
+- [x] `RideHealthWorkout.write` runs the same check up front (replacing its ends-before-start guard), logs the
+      reason and settles the ride unwritten, so the launch backfill can't crash-loop and rides behind it still write
+- [x] Tests: span within / at / over the limit, ends-before-start, every written type checked; a 5-day owed ride
+      settled unwritten without holding back the next
+- [x] Full `CyclometerTests` on "Cyclometer Tests": 3135 passed, 0 failed
+- [x] Device check on the everyday sim (that sim with the original ride was gone; seeded through a throwaway
+      `PersistenceClient.liveValue` test, deleted). A finished 5-day ride owed a workout + a 30-min one behind it:
+      `main` (fresh DerivedData) crashed at launch with the issue's `_HKObjectValidationFailureException`; the branch
+      launched, logged "never written … 345600 s" and wrote the 30-min ride's workout
+- [x] Brian: a resumed 5-day ride, Finish → S10 shows and the ride saves ("confirmed")
+
+---
+
+## #646 review (`/code-review --fix`, xhigh)
+
+- [x] Boundary probed with HealthKit on macOS (same 345,600 s limits): a distance `HKQuantitySample` builds at exactly
+      345,600 s and raises at 345,600.0001 s, so `checkSpan`'s `>` matches HealthKit. None of the four types has a
+      minimum duration. A zero-length sample builds too, so `end > start` is stricter than HealthKit (pre-existing,
+      no rider path)
+- Found, not fixed (no rider path): `saveRoute` writes track points stamped with the wall clock, so a clock moved by
+  days mid-ride and back could stretch the route past the limit while the ride's own span passes `checkSpan`. Not
+  verified whether HealthKit raises on an over-long route or returns an error, which `saveRoute` already catches
+- Found, not fixed (no effect on iOS 27): `checkSpan` lets the route, distance and energy limits veto the whole
+  workout, though `saveRoute` says the route never costs it. All four limits are equal today
+
+---
+
+## #650 — S10 shows finish stats stored by the backfill after it opens
+
+Approach (Brian, 2026-11-23): show the Summary as now, and fill in Ascent, Descent and Calories once the backfill
+stores them.
+
+- [x] `RideStats.isFinishStatsOwed`, read from `Ride.isFinishStatsOwed` in `fetchRideStats`
+- [x] `RideSummaryFeature`: on `.loaded` with stats still owed, re-read once a second for up to
+      `finishStatsWaitSeconds` (30); `.finishStatsStored(RideStats)` replaces the stats; a backfill that never lands
+      leaves them as loaded
+- [x] Tests: owed at load then stored; owed and never stored (stops after the limit, no hang); not owed reads once
+- [x] UX.md §S10 Summary line
+- [x] Build (app + tests)
+- [x] Full `CyclometerTests`, commit + PR
+
+**Review.** The full run failed 2 tests. `PersistenceClientTests.fetchRideStatsReturnsAggregates` compares a whole
+`RideStats` for rides finalized without finish stats, which are now correctly reported as owed: expectation updated,
+and `finalizeWithoutFinishStatsIsOwed` now checks the flag before and after the backfill's save.
+`LocationOneShotTests.concurrentRequestsAllResolve` failed with no message during a heavily loaded run (every test
+70–100 s, several clones failed to launch the host); it doesn't touch this change and passed on the rerun of the
+three affected suites (95 passed).

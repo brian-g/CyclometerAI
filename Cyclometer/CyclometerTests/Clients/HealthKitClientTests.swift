@@ -134,4 +134,38 @@ struct HealthKitClientTests {
     func otherZoneCountsHaveNoCeilings(_ starts: [Double]) throws {
         #expect(HealthKitClient.zoneCeilings(from: try Self.configuration(startingAt: starts)) == nil)
     }
+
+    // MARK: - Workout span (#646)
+
+    private static let rideStart = Date(timeIntervalSince1970: 1_757_155_800)
+    /// HealthKit's own limit, the same for every type the workout writes.
+    private static let limit = HKQuantityType(.distanceCycling).maximumAllowedDuration
+
+    @Test("a span up to Health's limit passes", arguments: [30.0 * 60, limit])
+    func spanWithinLimitPasses(_ seconds: TimeInterval) throws {
+        try HealthKitClient.checkSpan(from: Self.rideStart, to: Self.rideStart.addingTimeInterval(seconds))
+    }
+
+    /// A ride left running for 5 days: HealthKit raised an uncatchable exception on it.
+    @Test("a span over Health's limit throws before reaching HealthKit")
+    func spanOverLimitThrows() {
+        #expect(throws: WorkoutWriteError.exceedsMaximumDuration(Self.limit)) {
+            try HealthKitClient.checkSpan(from: Self.rideStart, to: Self.rideStart.addingTimeInterval(Self.limit + 1))
+        }
+    }
+
+    @Test("a span that ends before it starts throws")
+    func spanEndingBeforeStartThrows() {
+        #expect(throws: WorkoutWriteError.endsBeforeStart) {
+            try HealthKitClient.checkSpan(from: Self.rideStart, to: Self.rideStart.addingTimeInterval(-60))
+        }
+    }
+
+    /// The workout and its route are capped too, not only the samples, so a span check of the
+    /// samples alone would still let a long ride reach `HKWorkoutBuilder`.
+    @Test("every type the workout writes is checked, and each has a limit")
+    func everyWrittenTypeIsChecked() {
+        #expect(Set(HealthKitClient.workoutSpanTypes) == PermissionsClient.healthShareTypes)
+        #expect(HealthKitClient.workoutSpanTypes.allSatisfy { $0.isMaximumDurationRestricted })
+    }
 }
