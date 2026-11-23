@@ -3188,4 +3188,8 @@ Probed on iOS 27: the workout, its route, distance and active energy are all cap
 - [x] Tests: span within / at / over the limit, ends-before-start, every written type checked; a 5-day owed ride
       settled unwritten without holding back the next
 - [x] Full `CyclometerTests` on "Cyclometer Tests": 3135 passed, 0 failed
-- [ ] Brian: launch on the sim that holds the 5-day ride (the backfill crashed every launch), and finish a >4-day ride
+- [x] Device check on the everyday sim (that sim with the original ride was gone; seeded through a throwaway
+      `PersistenceClient.liveValue` test, deleted). A finished 5-day ride owed a workout + a 30-min one behind it:
+      `main` (fresh DerivedData) crashed at launch with the issue's `_HKObjectValidationFailureException`; the branch
+      launched, logged "never written … 345600 s" and wrote the 30-min ride's workout
+- [x] Brian: a resumed 5-day ride, Finish → S10 shows and the ride saves ("confirmed")
