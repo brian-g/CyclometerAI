@@ -105,30 +105,37 @@ enum RideWindExposure: Equatable, Sendable {
                   let course = RouteGeometry.bearingDegrees(from: coordinates[anchor], to: here)
             else { continue }
             let reading = samples[sample].reading
+            let windFrom = reading.windDirection.converted(to: .degrees).value
+            let windSpeed = reading.windSpeed.converted(to: .metersPerSecond).value
+            // A non-finite reading says nothing of the wind, so its stretch is left out, as S15
+            // leaves out such a sample (`RideWeatherSample.init?`): `RelativeWind` would read a NaN
+            // direction as a tailwind.
+            guard windFrom.isFinite, windSpeed.isFinite else { continue }
             legs.append(Leg(
                 course: course,
-                windFromDegrees: reading.windDirection.converted(to: .degrees).value,
-                windSpeedMPS: reading.windSpeed.converted(to: .metersPerSecond).value,
-                // Whole metres: the shares are whole percents, so finer adds nothing.
-                weight: Int((cumulative[index] - cumulative[index - 1]).rounded())
+                windFromDegrees: windFrom,
+                windSpeedMPS: windSpeed,
+                // Unrounded: a GPX with points under half a metre apart would weigh nothing in
+                // whole metres, and read as calm.
+                weight: cumulative[index] - cumulative[index - 1]
             ))
         }
         guard !legs.isEmpty else { return nil }
         return RideWindExposure(legs: legs)
     }
 
-    /// One stretch of riding against the wind over it, counted `weight` times: a second of a ride,
-    /// or a metre of a route.
+    /// One stretch of riding against the wind over it, weighed by `weight`: 1 for a second of a
+    /// ride, its length in metres for a stretch of route.
     private struct Leg {
         var course: Double
         var windFromDegrees: Double
         var windSpeedMPS: Double
-        var weight: Int
+        var weight: Double
     }
 
     /// The shares over `legs`, leaving out those under a calm wind; `.calm` when that is all of them.
     private init(legs: [Leg]) {
-        var head = 0, cross = 0, tail = 0
+        var head = 0.0, cross = 0.0, tail = 0.0
         for leg in legs where leg.windSpeedMPS >= Self.calmMPS {
             switch RelativeWind(windFrom: leg.windFromDegrees, course: leg.course) {
             case .headwind: head += leg.weight
@@ -146,11 +153,11 @@ enum RideWindExposure: Equatable, Sendable {
     }
 
     /// Largest-remainder rounding, so the three shares always add up to 100. Ties go to the
-    /// earlier count.
-    static func wholePercents(_ counts: [Int]) -> [Int] {
+    /// earlier count. Weights, not whole counts: S20's are metres of route.
+    static func wholePercents(_ counts: [Double]) -> [Int] {
         let total = counts.reduce(0, +)
         guard total > 0 else { return counts.map { _ in 0 } }
-        let exact = counts.map { Double($0) * 100 / Double(total) }
+        let exact = counts.map { $0 * 100 / total }
         var percents = exact.map { Int($0.rounded(.down)) }
         let order = exact.indices.sorted { lhs, rhs in
             let left = exact[lhs] - Double(percents[lhs]), right = exact[rhs] - Double(percents[rhs])

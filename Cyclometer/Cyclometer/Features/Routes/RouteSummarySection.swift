@@ -4,7 +4,7 @@ import SwiftUI
 /// moved to the Elevation section's Steepest (#570).
 ///
 /// Absent for a route with neither elevation nor a surface yet, where the line would only
-/// repeat the Distance row above it. Every value takes `.monospacedDigit()` so figures line up
+/// repeat the distance in the title block above it. Every value takes `.monospacedDigit()` so figures line up
 /// down the trailing edge and don't jitter when the surface lands after the screen opens.
 struct RouteSummarySection: View {
     let summary: RouteSummary

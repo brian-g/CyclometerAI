@@ -31,8 +31,8 @@ struct RouteDetailFeature {
         var summary: RouteSummary
 
         /// Empty until `fetchRoute` lands, and empty for good if the polyline could not be
-        /// decoded (`Route.coordinates` coalesces to `[]`) — the map then shows the route's
-        /// framed region with nothing drawn on it.
+        /// decoded (`Route.coordinates` coalesces to `[]`) — the map header then keeps its room
+        /// with no map drawn in it, and doesn't open the map sheet (#570).
         var coordinates: [RouteCoordinate] = []
 
         /// Nil until the route loads, and nil for a route with no `<ele>`.
@@ -51,7 +51,7 @@ struct RouteDetailFeature {
         var weather: RouteWeather = .loading
 
         /// The forecast along the route for when a ride starting now reaches each point (#561),
-        /// drawn over the map by `WindLayer`.
+        /// drawn by `WindLayer` in the map sheet (#570), and behind the Weather section's shares.
         var wind = RouteWindFeature.State()
         /// Whether this appearance's forecast and rides have landed. The wind waits for both: the
         /// forecast is its first sample, and the rides time the rest. Reset each time S20 appears,

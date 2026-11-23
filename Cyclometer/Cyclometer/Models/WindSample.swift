@@ -6,7 +6,8 @@ struct WindSample: Equatable, Sendable {
     var coordinate: RouteCoordinate
     var reading: WeatherReading
     /// How far along the route the sample is (`WindSamplePoint.distanceMeters`), which S20's wind
-    /// shares time each stretch of route by (#570). Nil off a route: W10's field around the rider.
+    /// shares time each stretch of route by (#570). Nil for W10's own reading, where the rider is:
+    /// the sample it hands `RouteWindFeature` along a route, and its field with none.
     var distanceMeters: Double? = nil
 }
 

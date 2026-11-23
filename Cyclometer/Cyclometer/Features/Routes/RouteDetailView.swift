@@ -75,8 +75,9 @@ struct RouteDetailList<MapHeader: View>: View {
 
     /// Room for the header from the first frame, while the polyline loads: every saved route was
     /// imported from a track, so it has one to draw. Only a polyline that could not be decoded
-    /// leaves the room empty, the map's own background.
-    private var hasHeader: Bool { store.summary.distanceMeters > 0 }
+    /// leaves the room empty, the map's own background. Always kept with a map to draw, as S15's
+    /// `reservesMapHeader` is: a route of one point has no length, but its map still needs the room.
+    private var hasHeader: Bool { drawsMap || store.summary.distanceMeters > 0 }
     /// The map itself, once the polyline has loaded.
     private var drawsMap: Bool { !store.coordinates.isEmpty }
     private var mapHeight: CGFloat { MapHeaderChrome.mapHeight(screenHeight: screenHeight) }
@@ -280,6 +281,9 @@ struct RouteHeaderMap: View {
     /// The route's arrows, placed for what the header shows. Kept here rather than placed in the
     /// map's content because placing walks the route (`RouteDetailMap`).
     @State private var arrows = RouteDirectionMarkers.Arrows.none
+    /// What the camera last reported showing. A return to S20 runs `onAppear` again, and a camera
+    /// that never moves needn't report again, so the seed mustn't replace what it said.
+    @State private var cameraBounds: RouteBounds?
 
     private var framing: MKMapRect { RideMapThumbnail.headerRect(for: [coordinates]) }
 
@@ -294,15 +298,17 @@ struct RouteHeaderMap: View {
             // The camera doesn't move, but what it shows is wider than the route's rect: the
             // header is taller than the route, and padded.
             .onMapCameraChange(frequency: .onEnd) { context in
-                placeArrows(RoutesMapCamera.bounds(for: context.region))
+                cameraBounds = RoutesMapCamera.bounds(for: context.region)
+                placeArrows(cameraBounds)
             }
         }
         // Room for the start and finish flags, whose balloons stand above their points, and for
         // the route's stroke at the sides — `RideHeaderMap`'s margins.
         .safeAreaPadding(.horizontal, Spacing.xl)
         .safeAreaPadding(.vertical, Spacing.xxl)
-        // Seeded, because `.onMapCameraChange` is not guaranteed to fire on the first settle.
-        .onAppear { placeArrows(RoutesMapCamera.bounds(for: MKCoordinateRegion(framing))) }
+        // Seeded, because `.onMapCameraChange` is not guaranteed to fire on the first settle. The
+        // route's rect is narrower than what the padded header shows, so only until the camera says.
+        .onAppear { placeArrows(cameraBounds ?? RoutesMapCamera.bounds(for: MKCoordinateRegion(framing))) }
     }
 
     private func placeArrows(_ visibleBounds: RouteBounds?) {

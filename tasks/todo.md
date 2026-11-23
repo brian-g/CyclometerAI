@@ -3153,3 +3153,20 @@ Elevation mirrors S15 (Ascent / Descent / Steepest; Max Grade leaves Summary). H
       4/4 (key-window cold-start flake, untouched code)
 - [x] #649 landed mid-branch: merged; `RouteDetailSnapshotTests`' shared helper now passes `.snapshot(…)`, so the new
       cases do too
+
+---
+
+## #570 review (`/code-review --fix`, xhigh)
+
+- [x] One-point route (no length, one coordinate): `hasHeader = drawsMap || distanceMeters > 0`, as S15 keeps the room
+      whenever it has a track
+- [x] Wind shares weighed in unrounded metres (`wholePercents` takes `[Double]`): a GPX with points under 0.5 m apart
+      read as calm. S15's seconds weigh 1.0, so its shares are unchanged
+- [x] Non-finite wind readings skipped in `alongRoute` (a NaN direction read as tailwind), as S15 drops such samples
+- [x] Header arrows keep the camera's last bounds; the route-rect seed only applies until the camera reports, so a
+      return from S15 doesn't re-place them narrower
+- [x] Stale doc comments: `coordinates`, `wind`, `RouteSummarySection`, `WindSample.distanceMeters`
+- [ ] **Decide (Brian):** a failed route read (or an undecodable polyline) keeps a blank half-screen band above the
+      title for good. S15 gives the room back on `trackReadFailed`; S20 would need a `routeUnavailable` action or flag
+- [ ] Targeted run: `RouteWindExposureTests`, `RouteMapSheetFeatureTests`, `RouteDetailMapSheetTests`,
+      `RouteDetailFeatureTests`, `RideDetailFeatureTests` (S15's shares), `RouteDetailSnapshotTests`
