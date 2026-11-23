@@ -22,6 +22,13 @@ struct RideSummaryFeatureTests {
         averageSpeedMPS: 6, maxSpeedMPS: 11, averageCadenceRPM: 90, maxCadenceRPM: 104, vehiclePassCount: 2
     )
 
+    /// `stats` for a ride still owed its finish stats (#650).
+    nonisolated private static let owedStats = {
+        var owed = stats
+        owed.isFinishStatsOwed = true
+        return owed
+    }()
+
     private static var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
@@ -31,7 +38,7 @@ struct RideSummaryFeatureTests {
     private func makeStore(
         persistenceClient: PersistenceClient,
         geocodingClient: GeocodingClient = .testValue,
-        clock: TestClock<Duration> = TestClock(),
+        clock: any Clock<Duration> = TestClock(),
         load: RideSummaryFeature.State.Load = .waiting
     ) -> TestStoreOf<RideSummaryFeature> {
         let storage = FileStorage.inMemory
@@ -147,12 +154,14 @@ struct RideSummaryFeatureTests {
     @Test("a ride owed its finish stats at load shows them once the backfill stores them")
     func finishStatsStoredAfterLoad() async {
         let clock = TestClock()
-        var owed = Self.stats
-        owed.isFinishStatsOwed = true
-        var stored = Self.stats
-        stored.ascentMeters = 412
-        stored.descentMeters = 398
-        stored.activeKilocalories = 640
+        let owed = Self.owedStats
+        let stored = {
+            var stats = Self.stats
+            stats.ascentMeters = 412
+            stats.descentMeters = 398
+            stats.activeKilocalories = 640
+            return stats
+        }()
         let current = LockIsolated(owed)
         var client = PersistenceClient.mock(trackPoints: [Self.summary.id: Self.track()], rides: [Self.summary])
         client.fetchRideStats = { _ in current.value }
@@ -164,8 +173,16 @@ struct RideSummaryFeatureTests {
         #expect(store.state.load == .loaded)
         #expect(store.state.stats == owed)
 
-        // Still owed a second later: nothing changes.
+        // Still owed a second later: that read isn't shown. Marked, so a still-owed read taken for
+        // the stored one would show here.
+        let stillOwed = {
+            var stats = owed
+            stats.maxSpeedMPS += 1
+            return stats
+        }()
+        current.setValue(stillOwed)
         await clock.advance(by: .seconds(1))
+        await allowStrayCallsToLand()
         #expect(store.state.stats == owed)
 
         current.setValue(stored)
@@ -175,23 +192,22 @@ struct RideSummaryFeatureTests {
         await store.finish()
     }
 
+    /// An immediate clock, so all the reads run before `finish` returns: chaining them through
+    /// one `TestClock.advance` depends on each sleep being registered in time.
     @Test("a backfill that never stores them leaves the Summary as loaded, and the reads stop")
     func finishStatsNeverStored() async {
-        let clock = TestClock()
-        var owed = Self.stats
-        owed.isFinishStatsOwed = true
+        let owed = Self.owedStats
         let reads = LockIsolated(0)
         var client = PersistenceClient.mock(trackPoints: [Self.summary.id: Self.track()], rides: [Self.summary])
         client.fetchRideStats = { _ in
             reads.withValue { $0 += 1 }
             return owed
         }
-        let store = makeStore(persistenceClient: client, clock: clock)
+        let store = makeStore(persistenceClient: client, clock: ImmediateClock())
         store.exhaustivity = .off
 
         await store.send(.task)
         await store.receive(\.loaded)
-        await clock.advance(by: .seconds(RideSummaryFeature.finishStatsWaitSeconds))
         await store.finish()
 
         #expect(store.state.load == .loaded)
@@ -199,21 +215,20 @@ struct RideSummaryFeatureTests {
         #expect(reads.value == 1 + RideSummaryFeature.finishStatsWaitSeconds)
     }
 
+    /// An immediate clock, so reads set off by mistake would all land before `finish` returns.
     @Test("a ride that isn't owed its finish stats is read once")
     func finishStatsNotOwed() async {
-        let clock = TestClock()
         let reads = LockIsolated(0)
         var client = PersistenceClient.mock(trackPoints: [Self.summary.id: Self.track()], rides: [Self.summary])
         client.fetchRideStats = { _ in
             reads.withValue { $0 += 1 }
             return Self.stats
         }
-        let store = makeStore(persistenceClient: client, clock: clock)
+        let store = makeStore(persistenceClient: client, clock: ImmediateClock())
         store.exhaustivity = .off
 
         await store.send(.task)
         await store.receive(\.loaded)
-        await clock.advance(by: .seconds(RideSummaryFeature.finishStatsWaitSeconds))
         await store.finish()
 
         #expect(reads.value == 1)

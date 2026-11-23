@@ -167,8 +167,9 @@ struct RideSummaryFeature {
 
     /// How long a ride still owed its finish stats at load is read again for them, once a
     /// second (#650). The backfill starts right after the finalize S10 waited for, and reads
-    /// Health's body mass and the saved track; one that hasn't landed by now has failed, and
-    /// is retried at the next launch.
+    /// Health's body mass and the saved track; one that hasn't landed by now has almost
+    /// certainly failed, and is retried at the next launch. One that lands later still shows
+    /// on S15, not here.
     static let finishStatsWaitSeconds = 30
 
     var body: some ReducerOf<Self> {
@@ -339,16 +340,28 @@ struct RideSummaryFeature {
     }
 
     /// Reads the ride's stats once a second until the backfill has stored its finish stats, for up
-    /// to `finishStatsWaitSeconds`. A failed read is tried again the next second.
+    /// to `finishStatsWaitSeconds`. A failed read is tried again the next second; if the last one
+    /// failed too, the log says so rather than blaming the backfill.
     private func awaitFinishStats(_ id: UUID) -> Effect<Action> {
         .run { [persistenceClient, clock] send in
+            var readError: (any Error)?
             for _ in 0..<Self.finishStatsWaitSeconds {
                 try await clock.sleep(for: .seconds(1))
-                guard let stats = try? await persistenceClient.fetchRideStats(id), !stats.isFinishStatsOwed else { continue }
-                await send(.finishStatsStored(stats))
-                return
+                do {
+                    let stats = try await persistenceClient.fetchRideStats(id)
+                    readError = nil
+                    guard !stats.isFinishStatsOwed else { continue }
+                    await send(.finishStatsStored(stats))
+                    return
+                } catch {
+                    readError = error
+                }
             }
-            logger.notice("ride \(id, privacy: .public)'s finish stats weren't stored within \(Self.finishStatsWaitSeconds, privacy: .public) s: S10 shows it without Ascent, Descent and Calories")
+            if let readError {
+                logger.error("ride \(id, privacy: .public)'s stats couldn't be read again for its finish stats: \(readError.localizedDescription, privacy: .public) — S10 shows it without Ascent, Descent and Calories")
+            } else {
+                logger.notice("ride \(id, privacy: .public)'s finish stats weren't stored within \(Self.finishStatsWaitSeconds, privacy: .public) s: S10 shows it without Ascent, Descent and Calories")
+            }
         }
     }
 
