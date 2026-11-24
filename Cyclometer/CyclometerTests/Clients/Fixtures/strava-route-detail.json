@@ -1,0 +1,64 @@
+{
+  "athlete" : { "id" : 134815, "resource_state" : 1 },
+  "description" : "Loop over the hills",
+  "distance" : 48211.6,
+  "elevation_gain" : 812.3,
+  "id" : 3344024577052366532,
+  "id_str" : "3344024577052366532",
+  "map" : { "id" : "r3344024577052366532", "polyline" : "a~l~Fjk~uOwHJy@P", "resource_state" : 3 },
+  "name" : "Berkeley Hills Loop",
+  "private" : false,
+  "starred" : true,
+  "timestamp" : 1700000000,
+  "type" : 1,
+  "sub_type" : 1,
+  "created_at" : "2026-03-02T17:44:10Z",
+  "updated_at" : "2026-10-11T09:15:00Z",
+  "estimated_moving_time" : 7240,
+  "segments" : [ {
+    "id" : 673683,
+    "resource_state" : 2,
+    "name" : "Grizzly Peak Climb",
+    "activity_type" : "Ride",
+    "distance" : 3412.8,
+    "average_grade" : 6.4,
+    "maximum_grade" : 12.1,
+    "elevation_high" : 512.0,
+    "elevation_low" : 293.0,
+    "start_latlng" : [ 37.8702, -122.2541 ],
+    "end_latlng" : [ 37.8811, -122.2433 ],
+    "climb_category" : 2,
+    "city" : "Berkeley",
+    "state" : "CA",
+    "country" : "United States",
+    "private" : false,
+    "athlete_pr_effort" : {
+      "pr_activity_id" : 9000000001,
+      "pr_elapsed_time" : 1052,
+      "pr_date" : "2026-11-21T14:40:02Z",
+      "effort_count" : 14
+    },
+    "athlete_segment_stats" : {
+      "pr_elapsed_time" : 1052,
+      "pr_date" : "2026-11-21",
+      "effort_count" : 14
+    }
+  }, {
+    "id" : 365235,
+    "resource_state" : 2,
+    "name" : "Tunnel Road",
+    "activity_type" : "Ride",
+    "distance" : 1826.4,
+    "average_grade" : 4.1,
+    "maximum_grade" : 8.0,
+    "start_latlng" : [ 37.8581, -122.2402 ],
+    "end_latlng" : [ 37.8655, -122.2265 ],
+    "climb_category" : 0,
+    "private" : false,
+    "athlete_segment_stats" : {
+      "pr_elapsed_time" : 398,
+      "pr_date" : "2026-06-14",
+      "effort_count" : 3
+    }
+  } ]
+}

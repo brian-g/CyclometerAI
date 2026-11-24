@@ -3332,3 +3332,33 @@ Verified: build clean; `StravaSessionTests`, `ConnectedServiceTests`, `StravaCac
 `AppOpenURLTests` 24/24, each test named in the output. The concurrent test fails with the join in
 `refreshedTokens` removed (checked, then restored). Not verifiable before #629: no screen calls `connect()` yet,
 so the presenter (Strava app and web paths, `redirectGrace`) is unexercised.
+
+---
+
+## #627 StravaClient: transport, models, rate limits
+
+Plan: StravaAuthClient gains `refreshAccessToken(rejected:)`; StravaClient (8 endpoints) with bearer, one retry
+after 401, rate-limit headers, 429 → `rateLimited(until:)` (quarter hour, or midnight UTC when a daily limit is spent).
+Fixtures synthesized from Strava's reference (repo is public); an opt-in live test checks real answers.
+
+- [x] `refreshAccessToken(rejected:)` on StravaAuthClient / StravaSession + tests
+- [x] StravaModels (domain), StravaWire (Strava JSON → domain)
+- [x] StravaRateLimit (pure) + tests
+- [x] StravaGzip + tests
+- [x] StravaClient live (`StravaAPI`), testValue, `+Mock`
+- [x] Fixtures + StravaClientTests (decode every endpoint, 401 retry, 429)
+- [x] StravaLiveTests (opt-in, env-gated)
+- [x] Docs: TCA §4.15, §8; PRD §8.12 + changelog
+- [x] Build, suites, mutation check of the retry, full CyclometerTests
+
+### Review
+
+- `StravaAuthClient.refreshAccessToken(rejected:)`: forced refresh after a 401; returns the stored token when another
+  request already replaced the rejected one, so concurrent 401s rotate once.
+- `StravaClient` live value is `StravaAPI`; Strava JSON lives in `StravaWire` (private DTOs → DataModel §3.8.1
+  models). Route `type` passed through: undocumented values, #634 filters after the live check.
+- Verified: build clean; StravaClientTests 26, StravaRateLimitTests 12, StravaGzipTests 2, StravaSessionTests 18,
+  each counted in the log; StravaLiveTests 4 skipped (no token). With the 401 retry disabled, both 401 tests fail
+  (checked, then restored). Full CyclometerTests: 3213 passed, 1 failed — `RideSummaryFeatureTests/
+  finishStatsNeverStored` amid a host stall (neighbours all ~47 s); 31/31 when the suite reran alone.
+- Not verified: real Strava answers. Needs the opt-in live check with a token (Brian).

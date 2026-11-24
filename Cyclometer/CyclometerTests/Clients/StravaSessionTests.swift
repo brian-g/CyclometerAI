@@ -144,6 +144,65 @@ struct StravaSessionTests {
         ))
     }
 
+    // MARK: - Refresh after a 401
+
+    @Test("A token Strava rejected is refreshed although the clock says it's fresh")
+    func rejectedTokenIsRefreshed() async throws {
+        let service = TokenService(
+            ["refresh": Self.tokenAnswer(access: "a2", refresh: "r2", expiresAt: Self.now.addingTimeInterval(21_600))]
+        )
+        let keychain = Self.stored(OAuthTokens(accessToken: "a1", refreshToken: "r1", expiresAt: Self.now.addingTimeInterval(3_600)))
+        let session = Self.makeSession(service: service, keychain: keychain, preferences: Self.connected())
+
+        #expect(try await session.refreshAccessToken(rejected: "a1") == "a2")
+        #expect(service.calls.value == [TokenService.Call(endpoint: "refresh", body: ["refresh_token": "r1"])])
+        #expect(try Self.tokens(in: keychain)?.refreshToken == "r2")
+    }
+
+    @Test("Ten concurrent requests rejected with the same token refresh once")
+    func concurrentRejectionsRefreshOnce() async throws {
+        let service = TokenService(
+            ["refresh": Self.tokenAnswer(access: "a2", refresh: "r2", expiresAt: Self.now.addingTimeInterval(21_600))],
+            latency: .milliseconds(50)
+        )
+        let keychain = Self.stored(OAuthTokens(accessToken: "a1", refreshToken: "r1", expiresAt: Self.now.addingTimeInterval(3_600)))
+        let session = Self.makeSession(service: service, keychain: keychain, preferences: Self.connected())
+
+        let tokens = try await withThrowingTaskGroup(of: String.self) { group in
+            for _ in 0..<10 { group.addTask { try await session.refreshAccessToken(rejected: "a1") } }
+            return try await group.reduce(into: []) { $0.append($1) }
+        }
+
+        #expect(tokens == Array(repeating: "a2", count: 10))
+        #expect(service.calls(to: "refresh").count == 1)
+    }
+
+    @Test("A rejection of a token already replaced returns the stored one without refreshing")
+    func staleRejectionUsesStoredToken() async throws {
+        let service = TokenService()
+        let session = Self.makeSession(
+            service: service,
+            keychain: Self.stored(OAuthTokens(accessToken: "a2", refreshToken: "r2", expiresAt: Self.now.addingTimeInterval(21_600))),
+            preferences: Self.connected()
+        )
+
+        #expect(try await session.refreshAccessToken(rejected: "a1") == "a2")
+        #expect(service.calls.value.isEmpty)
+    }
+
+    @Test("A refresh after a 401 that Strava refuses marks the account disconnected")
+    func refusedForcedRefreshDisconnects() async throws {
+        let preferences = Self.connected()
+        let session = Self.makeSession(
+            service: TokenService(["refresh": (400, Data())]),
+            keychain: Self.stored(OAuthTokens(accessToken: "a1", refreshToken: "r1", expiresAt: Self.now.addingTimeInterval(3_600))),
+            preferences: preferences
+        )
+
+        await #expect(throws: StravaAuthError.disconnected) { try await session.refreshAccessToken(rejected: "a1") }
+        #expect(preferences.wrappedValue.connectedServices.first?.isDisconnected == true)
+    }
+
     @Test("A refresh Strava refuses marks the account disconnected, and later requests don't call out", arguments: [400, 401])
     func refusedRefreshDisconnects(status: Int) async throws {
         let service = TokenService(["refresh": (status, Data(#"{"message":"Bad Request"}"#.utf8))])

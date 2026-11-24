@@ -14,6 +14,9 @@ struct StravaAuthClient: Sendable {
     /// A token to sign one Strava request, refreshed first when under five minutes are left.
     /// Throws `StravaAuthError.disconnected` when the account can't sign anything.
     var accessToken: @Sendable () async throws -> String
+    /// A token to replace `rejected` after Strava answered it with a 401: refreshed, unless
+    /// another request already replaced it. `StravaClient` retries once with it.
+    var refreshAccessToken: @Sendable (_ rejected: String) async throws -> String
     /// Revokes the token, and removes the Keychain item, the record and Strava's cached ride and
     /// route data.
     var disconnect: @Sendable () async throws -> Void
@@ -36,6 +39,7 @@ extension StravaAuthClient: DependencyKey {
         return StravaAuthClient(
             connect: { try await session.connect() },
             accessToken: { try await session.accessToken() },
+            refreshAccessToken: { try await session.refreshAccessToken(rejected: $0) },
             disconnect: { try await session.disconnect() },
             handleRedirect: { presenter.handleRedirect($0) }
         )
@@ -45,6 +49,7 @@ extension StravaAuthClient: DependencyKey {
     static let testValue = StravaAuthClient(
         connect: { throw StravaAuthError.cancelled },
         accessToken: { throw StravaAuthError.notConnected },
+        refreshAccessToken: { _ in throw StravaAuthError.notConnected },
         disconnect: {},
         handleRedirect: { _ in false }
     )

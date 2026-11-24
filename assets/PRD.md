@@ -51,6 +51,7 @@
 | 0.6.23 | 2026-11-21 | Brian / Claude | Strava (Phase 2). New §8.12: connecting through a stateless token service that holds the client secret, Keychain tokens, uploads chosen per ride in S10's Sync To section, segment efforts on S15, and segments on S20 from a Strava route itself or, for any route, from its previous rides synced to Strava (Explore Segments is closed to Standard-tier apps since 2026-09-01), Strava route import on S19 and S05.2, and gear with Multi-bike later. §6 and §8.6 point to it. |
 | 0.6.22 | 2026-11-19 | Brian / Claude | Orphan workouts (#584). §9.4's #318 decision note: an orphan closed out at relaunch that the rider had already ended keeps its real end time and gets its `HKWorkout` (UX.md §S10). One with no ride-end marker still gets none, since its end is the relaunch. |
 | 0.6.26 | 2026-11-23 | Brian / Claude | Strava token service (#625). §12 Privacy records what the service sees: the code and tokens in transit to Strava, stored and logged nowhere. §8.12 corrects what the webhook does: the stateless service only acknowledges a deauthorization, and the app learns of it from a refused refresh. The service runs as Cloudflare Pages Functions in the acmeapps.xyz repo. |
+| 0.6.27 | 2026-11-24 | Brian / Claude | Strava client (#627). §8.12 Limits and terms: a 429 waits until midnight UTC when a daily limit is spent, not just for the next quarter hour, since retrying every 15 minutes all day would only add refused requests that still count. |
 
 ---
 
@@ -1121,7 +1122,9 @@ one (`Bike.stravaGearID`). Uploads can't name gear, so once the upload has an `a
 
 - Rate limits belong to the app, shared by every rider: by default 200 requests per 15 minutes and 2,000 a day overall,
   of which non-upload requests (upload polling included) get 100 and 1,000. The client reads the `X-RateLimit-*` and
-  `X-ReadRateLimit-*` headers, and on a 429 waits for the next quarter hour. Nothing polls Strava in the background
+  `X-ReadRateLimit-*` headers, and on a 429 waits for the next quarter hour, or until midnight UTC when a daily count
+  is spent (the 15-minute windows reset on the quarter hour, the daily ones at midnight UTC). Nothing polls Strava in
+  the background
 - New Strava apps are single-player; an upgrade allows 10 athletes, enough for development and a small TestFlight.
   Anything wider waits on Strava's app review (#288)
 - Branding: S12.1 uses Strava's "Connect with Strava" button; Strava's sections on S15 and S20 carry the "Powered by

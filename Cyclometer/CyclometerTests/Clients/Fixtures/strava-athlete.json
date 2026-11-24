@@ -1,0 +1,37 @@
+{
+  "id" : 134815,
+  "username" : "example_rider",
+  "resource_state" : 3,
+  "firstname" : "Ada",
+  "lastname" : "Lovelace",
+  "city" : "San Francisco",
+  "state" : "CA",
+  "country" : "United States",
+  "sex" : "F",
+  "premium" : false,
+  "summit" : false,
+  "created_at" : "2017-11-14T02:30:05Z",
+  "updated_at" : "2026-10-31T13:44:28Z",
+  "measurement_preference" : "meters",
+  "weight" : 61.0,
+  "bikes" : [ {
+    "id" : "b12345678",
+    "primary" : true,
+    "name" : "Road Bike",
+    "resource_state" : 2,
+    "distance" : 18234567.8
+  }, {
+    "id" : "b12345679",
+    "primary" : false,
+    "name" : "Gravel Bike",
+    "resource_state" : 2,
+    "distance" : 2510000.0
+  } ],
+  "shoes" : [ {
+    "id" : "g12345",
+    "primary" : true,
+    "name" : "Running Shoes",
+    "resource_state" : 2,
+    "distance" : 4904.0
+  } ]
+}

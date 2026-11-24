@@ -21,6 +21,12 @@ enum StravaConfig {
     /// `kSecAttrAccount` of the Keychain item holding Strava's `OAuthTokens`.
     static let keychainAccount = "strava"
 
+    /// Strava's API. Every call goes through `StravaClient`.
+    static let apiBaseURL = URL(string: "https://www.strava.com/api/v3/")!
+
+    /// Routes per page in the S19 browser; Strava's default.
+    static let routesPerPage = 30
+
     /// A token with less than this left is refreshed before use (PRD §8.12).
     static let refreshMargin: TimeInterval = 5 * 60
 

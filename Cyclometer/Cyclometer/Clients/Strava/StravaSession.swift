@@ -124,6 +124,25 @@ actor StravaSession {
     /// A token to sign one Strava request: the stored one while it has five minutes or more
     /// left, otherwise a refreshed one.
     func accessToken() async throws -> String {
+        let tokens = try usableTokens()
+        if tokens.expiresAt.timeIntervalSince(now()) >= StravaConfig.refreshMargin {
+            return tokens.accessToken
+        }
+        return try await refreshedTokens(from: tokens).accessToken
+    }
+
+    /// A token to replace `rejected`, which Strava answered with a 401 although the clock says it
+    /// is still good. When the stored token is no longer `rejected`, another request has
+    /// refreshed since, and that token is returned without refreshing again: concurrent 401s
+    /// rotate the refresh token once.
+    func refreshAccessToken(rejected: String) async throws -> String {
+        let tokens = try usableTokens()
+        guard tokens.accessToken == rejected else { return tokens.accessToken }
+        return try await refreshedTokens(from: tokens).accessToken
+    }
+
+    /// The stored tokens, when the account can sign a request.
+    private func usableTokens() throws -> OAuthTokens {
         guard let record = stravaRecord else { throw StravaAuthError.notConnected }
         guard !record.isDisconnected else { throw StravaAuthError.disconnected }
         // The record travels in a backup and the tokens don't (DataModel.md §3.8), so on a
@@ -134,10 +153,7 @@ actor StravaSession {
             markDisconnected()
             throw StravaAuthError.disconnected
         }
-        if tokens.expiresAt.timeIntervalSince(now()) >= StravaConfig.refreshMargin {
-            return tokens.accessToken
-        }
-        return try await refreshedTokens(from: tokens).accessToken
+        return tokens
     }
 
     /// Joins the refresh in flight, or starts one. The task is unstructured so a caller that is
