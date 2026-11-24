@@ -3301,13 +3301,16 @@ TCA §4.15 gains `handleRedirect: (URL) -> Bool`; the forced refresh for a 401 r
 - [ ] `Clients/Keychain/KeychainClient.swift`: read/write/delete; generic password, service `xyz.acmeapps.ride.oauth`,
       update-then-add with `AfterFirstUnlockThisDeviceOnly`, missing item = nil / no-op delete; `OAuthTokens`
 - [ ] `Clients/Strava/StravaSession` actor (injected transport, keychain, clock, `Shared<AppPreferences>`, authorize):
-      connect (state nonce, denied, scope from callback, Keychain before record), accessToken (≥5 min left → as is;
+      connect (state nonce, denied, scope from callback, Keychain before record), accessToken (a record whose Keychain
+      item is missing → `isDisconnected`, throw `.disconnected`: the record travels in a backup and the tokens don't,
+      so a restored or new iPhone gets Reconnect, not an account that silently fails (#628 review); ≥5 min left → as is;
       one in-flight refresh task; rotated token written before return; 400/401 → `isDisconnected`, transient errors
       leave it), disconnect (best-effort revoke, then Keychain, record, `clearStravaCaches()`), handleRedirect
 - [ ] `StravaAuthPresenter`: `strava://oauth/mobile/authorize` when `canOpenURL`, else `ASWebAuthenticationSession`
       (`.customScheme("cyclometer")`); `redirectGrace` after didBecomeActive → `.cancelled`
 - [ ] `AppLinks.stravaTokenService`; `Info.plist` URL type + `LSApplicationQueriesSchemes`; `.urlOpened` routing
 - [ ] `PersistenceClient.clearStravaCaches()` (keeps `stravaRouteID`, sync records)
-- [ ] Tests: `StravaSessionTests` (10 concurrent → 1 refresh; refused → disconnected; connect/disconnect paths),
+- [ ] Tests: `StravaSessionTests` (10 concurrent → 1 refresh; refused → disconnected; record without its Keychain
+      item → disconnected, no network call; connect/disconnect paths),
       `ConnectedServiceTests` (live Keychain round-trip), `AppOpenURLTests`
 - [ ] TCA §4.15 / §8, DataModel §10
