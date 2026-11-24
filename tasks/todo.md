@@ -3251,5 +3251,15 @@ The Strava dev app is already registered.
 - [x] End to end on the preview deploy: token 200 → refresh 200 (same tokens: Strava reissues only under an hour
       left) → revoke 200 (empty) → refresh 400, old access token 401, code reuse 400. `cyclometer://acmeapps.xyz/strava`
       passes Strava's redirect check
-- [ ] Merge, create the webhook subscription, deauthorize → POST 200 in Pages logs
-- [ ] WAF rate-limit rule, burst check
+- [x] Merged (site PR #6). Webhook subscription created with `scripts/strava-webhook.sh create` (pushed to the site's
+      `main` at Brian's request): Strava's validation GET → 200. Authorize, then Revoke Access on strava.com →
+      Strava's `POST webhook` → 200 (seen in `wrangler pages deployment tail`)
+- [x] Found on the way: Spectrum's Security Shield (CUJO) blocks `acmeapps.xyz` from Brian's network (TLS errors from
+      every CLI client; `http://acmeapps.xyz:443/` redirects to a CUJO block page). Production checked via
+      `acmeapps-xyz.pages.dev` and check-host.net. Brian turned the filter off; a rider on Spectrum with it on would
+      have Strava connect blocked until the domain is recategorised
+- [ ] Brian: WAF rate-limit rule (`/ride/api/strava/`, per IP, >20 / 10 s → block 10 s)
+
+**Review.** #625's Done-when is met: all four endpoints work against Strava with the dev app, the webhook subscription
+is validated, and deployment and secret rotation are documented in the site repo (`docs/strava-token-service.md`).
+Secret rotation itself is unverified: Strava's docs don't describe it.
