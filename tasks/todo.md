@@ -3258,8 +3258,10 @@ The Strava dev app is already registered.
       every CLI client; `http://acmeapps.xyz:443/` redirects to a CUJO block page). Production checked via
       `acmeapps-xyz.pages.dev` and check-host.net. Brian turned the filter off; a rider on Spectrum with it on would
       have Strava connect blocked until the domain is recategorised
-- [ ] Brian: WAF rate-limit rule (`/ride/api/strava/`, per IP, >20 / 10 s → block 10 s)
+- [x] Brian: WAF rate-limit rule (`/ride/api/strava/`, per IP, >20 / 10 s → block 10 s). Burst check: 30th request
+      → 429, static pages unaffected, cleared within 12 s. Spectrum reported; they are unblocking the domain
 
 **Review.** #625's Done-when is met: all four endpoints work against Strava with the dev app, the webhook subscription
 is validated, and deployment and secret rotation are documented in the site repo (`docs/strava-token-service.md`).
-Secret rotation itself is unverified: Strava's docs don't describe it.
+Rotation: Strava's settings have Generate New Client Secret (doc updated). Whether earlier tokens survive a new
+secret is unverified; not a priority before launch.
