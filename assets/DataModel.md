@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-21 (Strava, PRD §8.12) — §3.8 ConnectedService becomes a `Codable` value in the AppPreferences document, with Keychain `OAuthTokens`, granted scopes and S10's remembered sync defaults. New §3.8.1: segment efforts cached on `Ride`, Strava route id and segments on `Route`. §9 adds schema 1.3.  
+**Updated:** 2026-11-24 (#628) — Schema 1.3 built: the Strava cache columns on `Ride` and `Route`, `SyncStatus.processing`, and `ConnectedService`, `connectedServices` and `syncDestinationDefaults` in the AppPreferences document. `SyncDestination` is stored by name, so the defaults are a JSON object and an unknown destination is dropped alone. §1, §3.7, §3.8, §9 and OQDM7 updated.  
+**Previously:** 2026-11-21 (Strava, PRD §8.12) — §3.8 ConnectedService becomes a `Codable` value in the AppPreferences document, with Keychain `OAuthTokens`, granted scopes and S10's remembered sync defaults. New §3.8.1: segment efforts cached on `Ride`, Strava route id and segments on `Route`. §9 adds schema 1.3.  
 **Previously:** 2026-11-20 (#606) — §3.1: `isHealthWorkoutOwed` is not set for a launch close-out with no ride-end marker. Its end is the relaunch, so it is finalized never owed a workout, in the same write. Documentation only; no schema change.
 **Previously:** 2026-11-19 (#588) — §11: OQDM6 and OQDM7 record what superseded their original answers (§3.7, §3.8), instead of contradicting them. §9 gains rows for #175's five crash-resume fields, #263's `trackSegmentIndex`, #277's `isHealthWorkoutOwed` and #406's `isRouteComplete`, and the MVP rows are renumbered into the order they shipped. Documentation only; no schema change.
 **Previously:** 2026-11-15 (#245) — §3.1 reconciled with `Ride.swift`, the source of truth: it gains the ten stored properties it was missing (#175's crash-resume fields, W5's cadence columns, `trackSegmentIndex`, `isRouteComplete`, `isHealthWorkoutOwed`) and drops the `radarEvents` and `vehiclePassEvents` `@Relationship` arrays, which #172 replaced with `rideId` foreign keys. `recordingState` is typed `Ride.RecordingState`, distinct from `ActiveRideFeature`'s unpersisted `RideRecordingState`. §2's ERD marks the `rideId` links as foreign keys. §9 states the declaration-site-default rule that §3.1 and §3.10 already cited. Documentation only; no schema change.
@@ -33,11 +34,11 @@
 │  Ride (summary)                       TrackPoint (1 Hz series)  │
 │  RadarEvent (discrete events)         (NSBatchInsertRequest)    │
 │  VehiclePassEvent (discrete events)                             │
-│  ConnectedService (still open — §3.8)                           │
 │                                                                 │
 │  JSON document (@Shared / .fileStorage)                         │
 │  AppPreferences (singleton)                                     │
 │    └─ PairedSensor[]  (nested value, #67)                       │
+│    └─ ConnectedService[]  (nested value, #628)                  │
 │  RiderProfile (singleton, HR overrides — #96, §3.5)             │
 │                                                                 │
 │  In-Memory (RideDataBuffer)                                     │
@@ -744,8 +745,8 @@ no longer possible as written, and the choice was between standalone `@Model`s q
   infrastructure and did not, having gone the same way for the same reasons (§3.5). M7's `Ride` is
   now the first entity that needs it.
 
-`ConnectedService` is untouched and still open — its Keychain-identifier pattern is a different
-problem, and nothing consumes it yet.
+`ConnectedService` was left open here — its Keychain-identifier pattern is a different problem. Strava
+settled it the same way (§3.8, built in #628).
 
 ---
 
@@ -864,6 +865,9 @@ enum ExternalService: String, Codable, Sendable, CaseIterable {
 // AppPreferences (§3.6) gains:
 //     var connectedServices: [ConnectedService] = []
 //     var syncDestinationDefaults: [SyncDestination: Bool] = [:]   // S10 Sync To's remembered toggles
+/// Stored by name ("appleHealth", or the service's raw value) through `RawRepresentable` and
+/// `CodingKeyRepresentable`, so the defaults map is a JSON object and a destination this build
+/// doesn't know is dropped alone on decode (#628).
 enum SyncDestination: Codable, Hashable, Sendable {
     case appleHealth
     case service(ExternalService)
@@ -1358,7 +1362,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | 1.1.9 (MVP — #537) | Add `Ride.pausesData: Data?`, optional, so inferred lightweight migration adds it as nil and a ride recorded before it reads as having no pauses (#186 doesn't apply). `RideSchemaMigrationTests` covers it |
 | 1.1.10 (M12 — Monetization) | Add `Ride.isHealthWorkoutDeferred: Bool = false`, set by `finalizeRide` instead of `isHealthWorkoutOwed` while the app is Free, and moved to owed when the rider accepts the unlock's backfill prompt (Monetization.md §4.1). Inferred lightweight migration gives older rides false |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
-| 1.3 (Phase 2 — Strava) | Add `Ride.stravaSegmentEffortsData`, `Ride.stravaSegmentsFetchedAt`, `Route.stravaRouteID`, `Route.stravaSegmentsData` and `Route.stravaSegmentsFetchedAt`, all optional, so inferred lightweight migration applies; `SyncStatus` gains `processing`. ConnectedService and the sync defaults are AppPreferences document fields (§3.8), not a schema stage |
+| 1.3 (Phase 2 — Strava) | Add `Ride.stravaSegmentEffortsData`, `Ride.stravaSegmentsFetchedAt`, `Route.stravaRouteID`, `Route.stravaSegmentsData` and `Route.stravaSegmentsFetchedAt`, all optional, so inferred lightweight migration applies; `SyncStatus` gains `processing`. ConnectedService and the sync defaults are AppPreferences document fields (§3.8), not a schema stage. Built in #628; `RideSchemaMigrationTests` and `RouteSchemaMigrationTests` open an older store with the new columns nil, and `AppPreferencesTests` decodes a document without the new keys |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 
 Key rules:
@@ -1407,7 +1411,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | OQDM4 | VehiclePassEvent should be persisted | Resolved — it is. Full @Model with initializer |
 | OQDM5 | Why is the entity called UserProfile? | Resolved — split into RiderProfile (physiology) and AppPreferences (preferences, sensors, services). #96 kept them separate documents and narrowed RiderProfile to HR overrides: the rest of "physiology" (resting HR, date of birth) is HealthKit's, not the app's |
 | OQDM6 | Sensor storage limited to fixed fields | Resolved. One `PairedSensor` record per sensor, with `role: SensorRole`, replaces the fixed fields. Since #67 it is a nested `Codable` value in the AppPreferences document, not a `@Model`, and since 2026-08-14 there is one record per role, enforced by S11's replace prompt (§3.7). The original answer, a `@Model` holding any number of sensors of any role, is superseded |
-| OQDM7 | Connected services list is fixed | Resolved. One `ConnectedService` record per service, with `serviceType: ExternalService`; new services add an enum case. Where it is stored was reopened when #69 took AppPreferences out of SwiftData, and the entity is deferred to Phase 2 (M13), specified but not built (§1, §3.8) |
+| OQDM7 | Connected services list is fixed | Resolved. One `ConnectedService` record per service, with `serviceType: ExternalService`; new services add an enum case. Where it is stored was reopened when #69 took AppPreferences out of SwiftData, and Strava settled it: a `Codable` value in the AppPreferences document, built in #628 (§1, §3.8) |
 | OQDM8 | What is mapOrientation for? | Resolved — it is real. PRD section 8.6 specifies heading-up vs north-up as a user-toggleable setting; stored in AppPreferences to persist across sessions. Landed at #199, governing the full-screen map sheet only; the W8 widget is always heading-up |
 | OQDM9 | Store bike information | Deferred to Phase 2, shape recorded in §3.9. A rider owns several bikes; each bike owns its speed/cadence/radar/power sensors and maps to a Strava gear id. Wheel circumference lives on the speed sensor, not on the bike and not on a wheelset entity — a hub-mounted CSC sensor is already bound to one wheel (research: PRD §8.9.1). Heart rate stays rider-scoped. Ride gains `bike` + a `bikeName` snapshot so history always names the bike ridden |
 | OQDM10 | Capture weather conditions for a ride | Resolved. A list of `RideWeatherSample`s stored as JSON on Ride, one per forecast fetched during the ride (#151). Fields: observation time, temperature, humidity, wind speed, wind direction, condition |

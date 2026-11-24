@@ -97,6 +97,10 @@ struct RouteSchemaMigrationTests {
             #expect(routes.allSatisfy { $0.mapThumbnailLight == nil && $0.mapThumbnailDark == nil })
             // #203's column, also new to a store this old.
             #expect(routes.allSatisfy { $0.terrainNarrative == nil })
+            // Schema 1.3's Strava columns (#628): none of these routes came from Strava.
+            #expect(routes.allSatisfy {
+                $0.stravaRouteID == nil && $0.stravaSegmentsData == nil && $0.stravaSegmentsFetchedAt == nil
+            })
             #expect(routes.contains { $0.name == "Pilot Mountain" && $0.coordinates == Self.hilly.coordinates })
         }
     }

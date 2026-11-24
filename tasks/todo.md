@@ -3265,3 +3265,49 @@ The Strava dev app is already registered.
 is validated, and deployment and secret rotation are documented in the site repo (`docs/strava-token-service.md`).
 Rotation: Strava's settings have Generate New Client Secret (doc updated). Whether earlier tokens survive a new
 secret is unverified; not a priority before launch.
+
+---
+
+## #628 — SwiftData schema 1.3: Strava caches on Ride and Route
+
+Prerequisite for #626 (Brian, 2026-11-24). Optional columns and AppPreferences document fields only; no consumer yet.
+The current store is 1.1.10 (1.2 Bikes isn't built), so the Done-when's "1.2 store" means the store this build ships.
+
+- [x] `Models/ConnectedService.swift`: `ConnectedService`, `ExternalService` (moved from `Ride.swift`, + `CaseIterable`),
+      `SyncDestination` with a string raw value so the defaults map encodes as an object and drops unknown keys alone.
+      `RawRepresentable` + `CodingKeyRepresentable` made the custom `encode(to:)` unnecessary: the synthesized encoder
+      writes the map as an object, and only `init(from:)` decodes it as `[String: Bool]`
+- [x] `AppPreferences`: `connectedServices`, `syncDestinationDefaults`; lenient decode
+- [x] `Ride`: `stravaSegmentEffortsData`, `stravaSegmentsFetchedAt`; `SyncStatus.processing`; stale `RideSyncSheetFeature` comments
+- [x] `Route`: `stravaRouteID`, `stravaSegmentsData`, `stravaSegmentsFetchedAt`
+- [x] Tests: legacy-store tests assert the new columns nil; `AppPreferencesTests` decode/round-trip; new `RideSyncTests`
+- [x] DataModel §1 / §3.7 / §3.8 / §9 / OQDM7
+- [ ] Build → Brian runs → full `CyclometerTests` → commit + PR
+
+---
+
+## #626 — Strava sign-in (waiting on #628)
+
+Approved plan (2026-11-24), kept here until #628 merges.
+
+Decisions (Brian): #628 first; `StravaAuthClient` owns the `ConnectedService` record (connect saves, a refused refresh
+flags `isDisconnected`, disconnect removes; `connect()` still returns it); the on-device "connect with/without the
+Strava app; survives relaunch" check moves to #629. Strava client id `300241` (public) → `StravaConfig.clientID`.
+
+Code vs spec: the `cyclometer` scheme isn't registered (`CFBundleURLTypes`), and the Strava-app path needs it;
+`AppFeature.fileOpened` drops non-file URLs → rename `.urlOpened`, non-file URLs go to `stravaAuth.handleRedirect`;
+TCA §4.15 gains `handleRedirect: (URL) -> Bool`; the forced refresh for a 401 retry is #627's.
+
+- [ ] `Clients/Keychain/KeychainClient.swift`: read/write/delete; generic password, service `xyz.acmeapps.ride.oauth`,
+      update-then-add with `AfterFirstUnlockThisDeviceOnly`, missing item = nil / no-op delete; `OAuthTokens`
+- [ ] `Clients/Strava/StravaSession` actor (injected transport, keychain, clock, `Shared<AppPreferences>`, authorize):
+      connect (state nonce, denied, scope from callback, Keychain before record), accessToken (≥5 min left → as is;
+      one in-flight refresh task; rotated token written before return; 400/401 → `isDisconnected`, transient errors
+      leave it), disconnect (best-effort revoke, then Keychain, record, `clearStravaCaches()`), handleRedirect
+- [ ] `StravaAuthPresenter`: `strava://oauth/mobile/authorize` when `canOpenURL`, else `ASWebAuthenticationSession`
+      (`.customScheme("cyclometer")`); `redirectGrace` after didBecomeActive → `.cancelled`
+- [ ] `AppLinks.stravaTokenService`; `Info.plist` URL type + `LSApplicationQueriesSchemes`; `.urlOpened` routing
+- [ ] `PersistenceClient.clearStravaCaches()` (keeps `stravaRouteID`, sync records)
+- [ ] Tests: `StravaSessionTests` (10 concurrent → 1 refresh; refused → disconnected; connect/disconnect paths),
+      `ConnectedServiceTests` (live Keychain round-trip), `AppOpenURLTests`
+- [ ] TCA §4.15 / §8, DataModel §10

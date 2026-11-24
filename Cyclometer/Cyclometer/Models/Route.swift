@@ -61,6 +61,20 @@ final class Route {
     /// for good on a route with no terrain analysis. Optional, so an older store migrates lightly.
     var terrainNarrative: String?
 
+    // MARK: - Strava (#628)
+    // DataModel.md §3.8.1. All optional, so an older store migrates lightly with nil in each.
+
+    /// Set by a Strava import; importing the same route again updates this one in place.
+    /// Kept when Strava is disconnected, with the route the rider chose to keep.
+    var stravaRouteID: String?
+
+    /// JSON `[StravaRouteSegment]`, from Strava's route detail. Deleted when Strava is
+    /// disconnected.
+    var stravaSegmentsData: Data?
+
+    /// When `stravaSegmentsData` was fetched; S20 refetches after seven days.
+    var stravaSegmentsFetchedAt: Date?
+
     // The JSON columns are read, and written in `init`, through `JSONColumn` (#563), which logs a
     // value that doesn't decode or encode rather than passing it off as absent.
 
