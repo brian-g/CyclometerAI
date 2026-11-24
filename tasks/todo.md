@@ -3271,7 +3271,7 @@ secret is unverified; not a priority before launch.
 ## #628 — SwiftData schema 1.3: Strava caches on Ride and Route
 
 Prerequisite for #626 (Brian, 2026-11-24). Optional columns and AppPreferences document fields only; no consumer yet.
-The current store is 1.1.10 (1.2 Bikes isn't built), so the Done-when's "1.2 store" means the store this build ships.
+The current store is 1.1.9 (1.1.10's `isHealthWorkoutDeferred` and 1.2 Bikes aren't built), so the Done-when's "1.2 store" means the store this build ships.
 
 - [x] `Models/ConnectedService.swift`: `ConnectedService`, `ExternalService` (moved from `Ride.swift`, + `CaseIterable`),
       `SyncDestination` with a string raw value so the defaults map encodes as an object and drops unknown keys alone.

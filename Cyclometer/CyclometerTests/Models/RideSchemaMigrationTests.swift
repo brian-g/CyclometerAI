@@ -390,7 +390,8 @@ struct RideSchemaMigrationTests {
             context.insert(Ride())
             try context.save()
 
-            let rides = try context.fetch(FetchDescriptor<Ride>())
+            // A fresh context, so the checks read what the save wrote, not this context's objects.
+            let rides = try ModelContext(context.container).fetch(FetchDescriptor<Ride>())
             #expect(rides.count == 2)
             #expect(rides.contains { $0.cadenceSampleCount == 42 && $0.cadenceSecondsByRPM == [90: 90] })
             #expect(rides.contains {

@@ -1,5 +1,8 @@
 import ComposableArchitecture
 import Foundation
+import os
+
+private let logger = Logger.cyclometer(.persistence)
 
 /// Persisted, non-physiological rider preferences — the MVP slice of
 /// DataModel.md §3.6.
@@ -270,19 +273,37 @@ struct AppPreferences: Codable, Equatable, Sendable {
         // dropped alone: the rest stay collapsed, and nothing throws to reset other preferences.
         let collapsedNames = (try? container.decodeIfPresent([String].self, forKey: .collapsedWidgetCategories)) ?? []
         collapsedWidgetCategories = Set(collapsedNames.compactMap(WidgetCategory.init(rawValue:)))
-        // `try?`: a record this build can't read loses the connection, which Reconnect restores,
-        // rather than every other preference.
-        connectedServices = (try? container.decodeIfPresent(
-            [ConnectedService].self, forKey: .connectedServices
-        )) ?? []
+        // Each record decodes on its own, like `DashboardPage`'s placements: one this build can't
+        // read — a service a newer build added, say — loses that connection alone, which Reconnect
+        // restores, not the rider's other accounts or every other preference.
+        connectedServices = ((try? container.decodeIfPresent(
+            [LossyConnectedService].self, forKey: .connectedServices
+        )) ?? []).compactMap(\.service)
         // Decoded as names, like the collapsed categories: a destination this build doesn't have
-        // is dropped alone, and the rest of the rider's choices are kept.
+        // is dropped alone, and the rest of the rider's choices are kept. Not
+        // `uniqueKeysWithValues`, which traps if two names ever read as one destination.
         let syncDefaults = (try? container.decodeIfPresent([String: Bool].self, forKey: .syncDestinationDefaults)) ?? [:]
         syncDestinationDefaults = Dictionary(
-            uniqueKeysWithValues: syncDefaults.compactMap { name, isOn in
+            syncDefaults.compactMap { name, isOn in
                 SyncDestination(rawValue: name).map { ($0, isOn) }
-            }
+            },
+            uniquingKeysWith: { first, _ in first }
         )
+    }
+
+    /// One `connectedServices` record, nil when this build can't read it. Logged, so a rider who
+    /// finds Strava disconnected after an update has a reason on record.
+    private struct LossyConnectedService: Decodable {
+        let service: ConnectedService?
+
+        init(from decoder: any Decoder) throws {
+            do {
+                service = try ConnectedService(from: decoder)
+            } catch {
+                logger.error("dropped a connected account this build can't read: \(String(describing: error), privacy: .public)")
+                service = nil
+            }
+        }
     }
 }
 

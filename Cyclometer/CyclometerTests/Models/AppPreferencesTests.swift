@@ -195,13 +195,16 @@ struct AppPreferencesTests {
         #expect(decoded.wheelCircumferenceMM == 2136)
     }
 
-    /// A record this build can't read, such as a service it doesn't have, loses the connection
-    /// (Reconnect restores it), not the rider's other preferences.
-    @Test("Unreadable connected accounts fall back to none and keep the rest")
-    func unreadableConnectedServicesFallBack() throws {
-        let json = Data(#"{"wheelCircumferenceMM":2136,"connectedServices":[{"serviceType":"garminConnect"}]}"#.utf8)
+    /// A record this build can't read, such as a service it doesn't have, loses that connection
+    /// alone (Reconnect restores it), not the rider's other accounts or preferences. The unknown
+    /// record is complete apart from its service, so the service is what this tests.
+    @Test("An unreadable connected account is dropped; the rest are kept")
+    func unreadableConnectedServiceIsDropped() throws {
+        let strava = #"{"serviceType":"strava","keychainIdentifier":"strava","athleteID":"12345","grantedScopes":["read"],"connectedAt":0,"isDisconnected":false}"#
+        let garmin = strava.replacingOccurrences(of: #""serviceType":"strava""#, with: #""serviceType":"garminConnect""#)
+        let json = Data(#"{"wheelCircumferenceMM":2136,"connectedServices":[\#(garmin),\#(strava)]}"#.utf8)
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
-        #expect(decoded.connectedServices.isEmpty)
+        #expect(decoded.connectedServices.map(\.serviceType) == [.strava])
         #expect(decoded.wheelCircumferenceMM == 2136)
     }
 

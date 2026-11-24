@@ -5,8 +5,15 @@ import Foundation
 /// §3.8 first sketched: one record per service, never queried, and owned by the document.
 ///
 /// A record exists from connect until disconnect. Its OAuth tokens live in the Keychain under
-/// `keychainIdentifier` and never touch the document, so they don't travel in a backup: a restored
-/// or new iPhone reconnects. `StravaAuthClient` (#626) is the only writer.
+/// `keychainIdentifier` and never touch the document, so they don't travel in a backup. The record
+/// does (the document is in Documents, which is backed up), so on a restored or new iPhone it
+/// arrives without its tokens: its writer, `StravaAuthClient` (#626), must treat a missing
+/// Keychain item as `isDisconnected`, or S12 shows an account as connected that can't sign a
+/// request, and the rider is never asked to reconnect.
+///
+/// Decoded by the synthesized decoder, which throws on a missing key, `isDisconnected`'s default
+/// included. A field added later must be optional or decoded by hand, or every saved record fails
+/// to decode and every rider is silently disconnected.
 struct ConnectedService: Codable, Equatable, Sendable, Identifiable {
     /// One record per service (OQDM7).
     var id: ExternalService { serviceType }
@@ -21,8 +28,8 @@ struct ConnectedService: Codable, Equatable, Sendable, Identifiable {
     /// is hidden and named on S12.1 rather than failing (PRD §8.12).
     var grantedScopes: Set<String>
     var connectedAt: Date
-    /// The service refused a refresh (the rider revoked access on its site). S12.1 says so and
-    /// offers Reconnect.
+    /// The service refused a refresh (the rider revoked access on its site), or the Keychain item
+    /// is missing (a restored or new iPhone). S12.1 says so and offers Reconnect.
     var isDisconnected: Bool = false
 }
 

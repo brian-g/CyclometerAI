@@ -61,6 +61,18 @@ final class Route {
     /// for good on a route with no terrain analysis. Optional, so an older store migrates lightly.
     var terrainNarrative: String?
 
+    // The JSON columns are read, and written in `init`, through `JSONColumn` (#563), which logs a
+    // value that doesn't decode or encode rather than passing it off as absent.
+
+    /// Nil also for the empty value `backfillRouteTerrain` stores, which `JSONColumn` reads as none.
+    var terrain: RouteTerrainAnalysis? {
+        Self.column("terrainData", of: id).read(RouteTerrainAnalysis.self, from: terrainData)
+    }
+
+    var surface: RouteSurfaceBreakdown? {
+        Self.column("surfaceData", of: id).read(RouteSurfaceBreakdown.self, from: surfaceData)
+    }
+
     // MARK: - Strava (#628)
     // DataModel.md §3.8.1. All optional, so an older store migrates lightly with nil in each.
 
@@ -74,18 +86,6 @@ final class Route {
 
     /// When `stravaSegmentsData` was fetched; S20 refetches after seven days.
     var stravaSegmentsFetchedAt: Date?
-
-    // The JSON columns are read, and written in `init`, through `JSONColumn` (#563), which logs a
-    // value that doesn't decode or encode rather than passing it off as absent.
-
-    /// Nil also for the empty value `backfillRouteTerrain` stores, which `JSONColumn` reads as none.
-    var terrain: RouteTerrainAnalysis? {
-        Self.column("terrainData", of: id).read(RouteTerrainAnalysis.self, from: terrainData)
-    }
-
-    var surface: RouteSurfaceBreakdown? {
-        Self.column("surfaceData", of: id).read(RouteSurfaceBreakdown.self, from: surfaceData)
-    }
 
     // MARK: - Bounding box
     // Flat columns rather than a nested value so a #Predicate can filter on them:

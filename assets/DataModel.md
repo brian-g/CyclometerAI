@@ -1,7 +1,7 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-24 (#628) — Schema 1.3 built: the Strava cache columns on `Ride` and `Route`, `SyncStatus.processing`, and `ConnectedService`, `connectedServices` and `syncDestinationDefaults` in the AppPreferences document. `SyncDestination` is stored by name, so the defaults are a JSON object and an unknown destination is dropped alone. §1, §3.7, §3.8, §9 and OQDM7 updated.  
+**Updated:** 2026-11-24 (#628) — Schema 1.3 built: the Strava cache columns on `Ride` and `Route`, `SyncStatus.processing`, and `ConnectedService`, `connectedServices` and `syncDestinationDefaults` in the AppPreferences document. `SyncDestination` is stored by name, so the defaults are a JSON object and an unknown destination is dropped alone. §1, §3.1, §3.7, §3.8, §9 and OQDM7 updated.  
 **Previously:** 2026-11-21 (Strava, PRD §8.12) — §3.8 ConnectedService becomes a `Codable` value in the AppPreferences document, with Keychain `OAuthTokens`, granted scopes and S10's remembered sync defaults. New §3.8.1: segment efforts cached on `Ride`, Strava route id and segments on `Route`. §9 adds schema 1.3.  
 **Previously:** 2026-11-20 (#606) — §3.1: `isHealthWorkoutOwed` is not set for a launch close-out with no ride-end marker. Its end is the relaunch, so it is finalized never owed a workout, in the same write. Documentation only; no schema change.
 **Previously:** 2026-11-19 (#588) — §11: OQDM6 and OQDM7 record what superseded their original answers (§3.7, §3.8), instead of contradicting them. §9 gains rows for #175's five crash-resume fields, #263's `trackSegmentIndex`, #277's `isHealthWorkoutOwed` and #406's `isRouteComplete`, and the MVP rows are renumbered into the order they shipped. Documentation only; no schema change.
@@ -223,7 +223,7 @@ final class Ride {
     var isHealthWorkoutDeferred: Bool = false
 
     // MARK: - Sync Status
-    // Per-service sync tracking. Written by RideSyncSheetFeature after upload.
+    // Per-service sync tracking. Written by SyncQueueFeature (TCA.md §4.15) as uploads run.
     @Attribute(.externalStorage)
     var syncRecordsData: Data?
 
@@ -235,6 +235,10 @@ final class Ride {
     func syncRecord(for service: ExternalService) -> RideSyncRecord? {
         syncRecords.first { $0.service == service }
     }
+
+    // MARK: - Strava (#628, §3.8.1)
+    var stravaSegmentEffortsData: Data?        // [StravaSegmentEffort]; nil = never fetched, [] = none
+    var stravaSegmentsFetchedAt: Date?
 
     // MARK: - State
     var recordingState: Ride.RecordingState    // .active | .paused | .ended — nested enum, below
@@ -310,7 +314,7 @@ enum WeatherCondition: String, Codable, Sendable {
     case clear, partlyCloudy, cloudy, foggy, drizzle, rain, heavyRain, snow, thunderstorm
 }
 
-/// Per-service sync record stored on Ride. Written by RideSyncSheetFeature after upload.
+/// Per-service sync record stored on Ride. Written by SyncQueueFeature (TCA.md §4.15) as uploads run.
 /// Phase 2 — structure defined in MVP for architecture continuity.
 struct RideSyncRecord: Codable, Sendable {
     var service: ExternalService
@@ -323,6 +327,7 @@ struct RideSyncRecord: Codable, Sendable {
 enum SyncStatus: String, Codable, Sendable {
     case pending    // Not yet attempted
     case uploading  // In progress
+    case processing // Uploaded; awaiting the service's activity id, so a ride quit mid-poll resumes polling (#628)
     case synced     // Successfully uploaded
     case failed     // Upload failed; see RideSyncRecord.errorMessage
 }
