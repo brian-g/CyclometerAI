@@ -902,12 +902,15 @@ struct KeychainClient {
 }
 
 /// ASWebAuthenticationSession or the Strava app, then the token service. Owns refresh: an actor inside the live
-/// value serializes it, so concurrent requests refresh once and the rotated refresh token is written first.
+/// value (`StravaSession`) serializes it, so concurrent requests refresh once and the rotated refresh token is
+/// written first. Owns Strava's `ConnectedService` record in the AppPreferences document: connect saves it, a
+/// refused refresh or a missing Keychain item flags `isDisconnected`, disconnect removes it (#626).
 @DependencyClient
 struct StravaAuthClient {
-    var connect:     @Sendable () async throws -> ConnectedService       // OAuth + exchange + Keychain write
-    var accessToken: @Sendable () async throws -> String                 // refreshes under 5 min left
-    var disconnect:  @Sendable () async throws -> Void                   // revoke + Keychain delete
+    var connect:        @Sendable () async throws -> ConnectedService    // OAuth + exchange + Keychain write + record
+    var accessToken:    @Sendable () async throws -> String              // refreshes under 5 min left
+    var disconnect:     @Sendable () async throws -> Void                // Keychain + record + caches, then revoke
+    var handleRedirect: @MainActor @Sendable (URL) -> Bool               // the Strava app's redirect, from AppFeature.urlOpened
 }
 
 @DependencyClient
@@ -922,6 +925,11 @@ struct StravaClient {
     var setGear:         @Sendable (_ activityID: String, _ gearID: String) async throws -> Void
 }
 ```
+
+`KeychainClient` items are generic passwords under service `xyz.acmeapps.ride.oauth`, one account per service
+(`strava`). The Strava app's redirect reaches the app through the `cyclometer` scheme (`CFBundleURLTypes`):
+`AppView.onOpenURL` sends `AppFeature.urlOpened`, which imports a file as before and hands any other URL to
+`handleRedirect`. The web session catches its redirect itself.
 
 `StravaClient`'s live value adds the bearer token from `StravaAuthClient`, retries once after a 401 with a refreshed
 token, reads the rate-limit headers, and throws `StravaError.rateLimited(until:)` on a 429.
@@ -1094,8 +1102,10 @@ Cyclometer/
 │   └── Onboarding/                        // Onboarding*, Welcome*, SensorPairing*
 │
 ├── Clients/                               // one folder per dependency client
-│   ├── Altimeter/  Audio/  BLE/  Geocoding/  Haptics/  HealthKit/  Location/
+│   ├── Altimeter/  Audio/  BLE/  Geocoding/  Haptics/  HealthKit/  Keychain/  Location/
 │   ├── LiveActivity/  MapSnapshot/  Overpass/  Permissions/  Screen/  Weather/
+│   ├── Strava/                            // StravaAuthClient, StravaSession (actor), StravaAuthPresenter,
+│   │                                      // StravaConfig (#626)
 │   ├── Persistence/                       // PersistenceClient, Ride/RoutePersistenceActor,
 │   │                                      // SwiftDataStack, CoreDataStack, RideDataBuffer,
 │   │                                      // TrackPointMO, CyclometerTimeSeries.xcdatamodeld

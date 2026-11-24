@@ -4,13 +4,14 @@ import ComposableArchitecture
 @testable import Cyclometer
 
 /// "Open in Cyclometer" on a `.gpx` from Files, Mail or Safari, which `CFBundleDocumentTypes`
-/// advertises and `AppView.onOpenURL` hands to the reducer.
+/// advertises, and Strava's sign-in redirect through the `cyclometer` scheme (#626). Both arrive
+/// through `AppView.onOpenURL`.
 ///
 /// The import itself is `RoutesFeatureTests`' business — what matters here is that the file
 /// reaches `.fileSelected` at all, and that the rider is looking at the list it lands in
 /// rather than whatever tab they opened the file from.
 @MainActor
-@Suite("AppFeature — an opened file")
+@Suite("AppFeature — an opened URL")
 struct AppOpenURLTests {
     typealias ScanCall = StartSheetPresentationTests.ScanCall
 
@@ -37,7 +38,7 @@ struct AppOpenURLTests {
         let store = makeStore()
         store.exhaustivity = .off(showSkippedAssertions: false)
 
-        await store.send(.fileOpened(Self.opened)) {
+        await store.send(.urlOpened(Self.opened)) {
             $0.selectedTab = .routes
             $0.routes.path.removeAll()
         }
@@ -45,13 +46,30 @@ struct AppOpenURLTests {
         await store.finish()
     }
 
-    /// The app registers no custom scheme, so a non-file URL is something it was handed by
-    /// mistake — it must not select a tab or throw away the rider's place in the stack.
-    @Test("Ignores a URL that isn't a file")
-    func ignoresNonFileURLs() async {
+    /// Strava's redirect goes to the sign-in waiting for it, and nothing else moves: the rider
+    /// is back on the screen where they tapped Connect.
+    @Test("Hands Strava's redirect to the sign-in, leaving the tab and stack alone")
+    func forwardsTheStravaRedirect() async {
+        let handed = LockIsolated<[URL]>([])
+        let store = makeStore()
+        store.dependencies.stravaAuth.handleRedirect = { url in
+            handed.withValue { $0.append(url) }
+            return true
+        }
+        let redirect = URL(string: "cyclometer://acmeapps.xyz/strava?state=s&code=c&scope=read")!
+
+        await store.send(.urlOpened(redirect))
+        await store.finish()
+        #expect(handed.value == [redirect])
+    }
+
+    /// A non-file URL that isn't Strava's redirect is something the app was handed by mistake:
+    /// it must not select a tab or throw away the rider's place in the stack.
+    @Test("Ignores a URL that is neither a file nor Strava's redirect")
+    func ignoresOtherURLs() async {
         let store = makeStore()
 
-        await store.send(.fileOpened(URL(string: "https://example.com/route.gpx")!))
+        await store.send(.urlOpened(URL(string: "https://example.com/route.gpx")!))
         await store.finish()
     }
 }

@@ -1187,7 +1187,7 @@ struct RoutesFeatureReviewTests {
         }
 
         // No effect: the in-flight import owns the screen. The alert is the only change —
-        // a file handed over by `AppFeature.fileOpened` has no disabled button to bounce off,
+        // a file handed over by `AppFeature.urlOpened` has no disabled button to bounce off,
         // so dropping it silently would read as the app losing it.
         await store.send(.fileSelected(url)) {
             $0.alert = AlertState {

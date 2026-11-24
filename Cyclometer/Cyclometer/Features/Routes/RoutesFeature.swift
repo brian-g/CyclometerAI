@@ -410,7 +410,7 @@ struct RoutesFeature {
                 // again mid-parse gets the same route saved twice.
                 //
                 // Unreachable from the picker, whose Import button is disabled while this is
-                // true, but not from `AppFeature.fileOpened` — a second "Open in Cyclometer"
+                // true, but not from `AppFeature.urlOpened` — a second "Open in Cyclometer"
                 // has no such gate, and dropping it silently reads as the app losing the file.
                 guard !state.isImporting else {
                     state.alert = Self.alert("Still Importing",

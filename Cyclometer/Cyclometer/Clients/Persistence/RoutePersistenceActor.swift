@@ -108,6 +108,26 @@ actor RoutePersistenceActor {
         }
     }
 
+    /// Deletes the Strava segments cached on every route, when Strava is disconnected (PRD
+    /// §8.12). `stravaRouteID` stays: an imported route is GPX the rider chose to keep (OQ-S3), and
+    /// a reconnect re-imports it in place by that id.
+    func clearStravaCaches() throws {
+        do {
+            let routes = try modelContext.fetch(FetchDescriptor<Route>(
+                predicate: #Predicate { $0.stravaSegmentsData != nil || $0.stravaSegmentsFetchedAt != nil }
+            ))
+            guard !routes.isEmpty else { return }
+            for route in routes {
+                route.stravaSegmentsData = nil
+                route.stravaSegmentsFetchedAt = nil
+            }
+            try modelContext.save()
+        } catch {
+            logger.error("clearStravaCaches failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// Routes still without a map thumbnail, newest first (#273) — what
     /// `RouteMapThumbnail.backfill` works through.
     func routeIdsMissingMapThumbnail() throws -> [UUID] {

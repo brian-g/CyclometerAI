@@ -36,6 +36,7 @@ extension PersistenceClient {
         onSaveRouteSurface: @escaping @Sendable (UUID, RouteSurfaceBreakdown) -> Void = { _, _ in },
         onSaveRouteNarrative: @escaping @Sendable (UUID, String) -> Void = { _, _ in },
         onSaveRouteMapThumbnail: @escaping @Sendable (UUID, Data, Data) -> Void = { _, _, _ in },
+        onClearStravaCaches: @escaping @Sendable () -> Void = {},
         backfilledRouteCount: Int = 0,
         storeStatus: PersistentStoreStatus = .available,
         storeReset: PersistentStoreReset = PersistentStoreReset(preservedStores: [], status: .available)
@@ -96,6 +97,7 @@ extension PersistenceClient {
             saveRouteMapThumbnail: { onSaveRouteMapThumbnail($0, $1, $2) },
             fetchRouteIdsMissingMapThumbnail: { routeIdsMissingMapThumbnail },
             fetchRouteMapThumbnail: { routeMapThumbnails[$0] },
+            clearStravaCaches: { onClearStravaCaches() },
             storeStatus: { storeStatus },
             resetUnavailableStores: { storeReset }
         )

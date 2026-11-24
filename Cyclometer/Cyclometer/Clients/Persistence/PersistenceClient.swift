@@ -110,6 +110,10 @@ struct PersistenceClient: Sendable {
     /// One route's map thumbnail, or nil when it has none yet. Read per row, like
     /// `fetchRideMapThumbnail`, so `fetchRoutes` never pulls every route's images (#273).
     var fetchRouteMapThumbnail: @Sendable (UUID) async throws -> RideMapThumbnailData?
+    /// Deletes the Strava data cached on rides and routes (segment efforts, route segments) when
+    /// Strava is disconnected (PRD §8.12, DataModel.md §3.8.1). Keeps `Route.stravaRouteID` and
+    /// every `RideSyncRecord`.
+    var clearStravaCaches: @Sendable () async throws -> Void
     /// Which store, if either, failed to open at launch and is running on a stand-in (#206).
     var storeStatus: @Sendable () -> PersistentStoreStatus
     /// The rider's reset (#206): moves each failed store aside and opens a fresh one where it
@@ -189,6 +193,10 @@ extension PersistenceClient: DependencyKey {
             saveRouteMapThumbnail: { try await stores.routeActor.saveMapThumbnail(id: $0, light: $1, dark: $2) },
             fetchRouteIdsMissingMapThumbnail: { try await stores.routeActor.routeIdsMissingMapThumbnail() },
             fetchRouteMapThumbnail: { try await stores.routeActor.fetchMapThumbnail(id: $0) },
+            clearStravaCaches: {
+                try await stores.rideActor.clearStravaCaches()
+                try await stores.routeActor.clearStravaCaches()
+            },
             storeStatus: { stores.status },
             resetUnavailableStores: {
                 @Dependency(\.date) var date
@@ -254,6 +262,7 @@ extension PersistenceClient: DependencyKey {
         saveRouteMapThumbnail: { _, _, _ in },
         fetchRouteIdsMissingMapThumbnail: { [] },
         fetchRouteMapThumbnail: { _ in nil },
+        clearStravaCaches: {},
         storeStatus: { .available },
         resetUnavailableStores: { PersistentStoreReset(preservedStores: [], status: .available) }
     )
