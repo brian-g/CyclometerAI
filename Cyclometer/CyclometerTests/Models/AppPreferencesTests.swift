@@ -109,6 +109,9 @@ struct AppPreferencesTests {
         ])
         // Added by #517, default empty.
         preferences.collapsedWidgetCategories = [.route, .heartRate]
+        // Added by #628, both default empty.
+        preferences.connectedServices = [Self.stravaAccount]
+        preferences.syncDestinationDefaults = [.appleHealth: false, .service(.strava): true]
 
         let data = try JSONEncoder().encode(preferences)
         #expect(try JSONDecoder().decode(AppPreferences.self, from: data) == preferences)
@@ -155,6 +158,54 @@ struct AppPreferencesTests {
         #expect(decoded.dashboardLayout == .factory)
         // Added by #517; every Add Widget section starts expanded.
         #expect(decoded.collapsedWidgetCategories.isEmpty)
+        // Added by #628; no account connected, and no Sync To choice made yet.
+        #expect(decoded.connectedServices.isEmpty)
+        #expect(decoded.syncDestinationDefaults.isEmpty)
+    }
+
+    private static let stravaAccount = ConnectedService(
+        serviceType: .strava,
+        keychainIdentifier: "strava",
+        athleteID: "12345",
+        accountDisplayName: "Ada Lovelace",
+        grantedScopes: ["read", "activity:write"],
+        connectedAt: Date(timeIntervalSince1970: 1_800_000_000),
+        isDisconnected: true
+    )
+
+    /// Keyed by raw value, so the file reads as a plain object rather than the alternating
+    /// `[key, value, …]` array a dictionary keyed by the synthesized enum encoding would be.
+    @Test("Sync To defaults are stored as an object keyed by destination name")
+    func syncDefaultsEncodeAsAnObject() throws {
+        var preferences = AppPreferences()
+        preferences.syncDestinationDefaults = [.appleHealth: true, .service(.strava): false]
+
+        let data = try JSONEncoder().encode(preferences)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(object["syncDestinationDefaults"] as? [String: Bool] == ["appleHealth": true, "strava": false])
+    }
+
+    /// A destination added by a newer build, read by this one.
+    @Test("An unknown Sync To destination is dropped; the rest are kept")
+    func unknownSyncDestinationIsDropped() throws {
+        let json = Data(#"{"wheelCircumferenceMM":2136,"syncDestinationDefaults":{"strava":true,"garminConnect":true}}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+        #expect(decoded.syncDestinationDefaults == [.service(.strava): true])
+        #expect(decoded.wheelCircumferenceMM == 2136)
+    }
+
+    /// A record this build can't read, such as a service it doesn't have, loses that connection
+    /// alone (Reconnect restores it), not the rider's other accounts or preferences. The unknown
+    /// record is complete apart from its service, so the service is what this tests.
+    @Test("An unreadable connected account is dropped; the rest are kept")
+    func unreadableConnectedServiceIsDropped() throws {
+        let strava = #"{"serviceType":"strava","keychainIdentifier":"strava","athleteID":"12345","grantedScopes":["read"],"connectedAt":0,"isDisconnected":false}"#
+        let garmin = strava.replacingOccurrences(of: #""serviceType":"strava""#, with: #""serviceType":"garminConnect""#)
+        let json = Data(#"{"wheelCircumferenceMM":2136,"connectedServices":[\#(garmin),\#(strava)]}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+        #expect(decoded.connectedServices.map(\.serviceType) == [.strava])
+        #expect(decoded.wheelCircumferenceMM == 2136)
     }
 
     /// `imagery`, offered while #537 was built and then dropped, or a basemap from a newer build.

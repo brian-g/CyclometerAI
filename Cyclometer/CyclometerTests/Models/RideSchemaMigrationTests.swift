@@ -378,15 +378,25 @@ struct RideSchemaMigrationTests {
 
             let context = try ModelContext(openStore(at: url))
             let existing = try #require(context.fetch(FetchDescriptor<Ride>()).first)
+            // Schema 1.3's Strava cache (#628) is new to a store this old: never fetched.
+            #expect(existing.stravaSegmentEffortsData == nil)
+            #expect(existing.stravaSegmentsFetchedAt == nil)
             existing.cadenceSampleCount = 42
             existing.cadenceSecondsByRPM = [90: 90]
+            let fetchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+            existing.stravaSegmentEffortsData = Data("[]".utf8)
+            existing.stravaSegmentsFetchedAt = fetchedAt
 
             context.insert(Ride())
             try context.save()
 
-            let rides = try context.fetch(FetchDescriptor<Ride>())
+            // A fresh context, so the checks read what the save wrote, not this context's objects.
+            let rides = try ModelContext(context.container).fetch(FetchDescriptor<Ride>())
             #expect(rides.count == 2)
             #expect(rides.contains { $0.cadenceSampleCount == 42 && $0.cadenceSecondsByRPM == [90: 90] })
+            #expect(rides.contains {
+                $0.stravaSegmentEffortsData == Data("[]".utf8) && $0.stravaSegmentsFetchedAt == fetchedAt
+            })
         }
     }
 }

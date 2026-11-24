@@ -73,6 +73,20 @@ final class Route {
         Self.column("surfaceData", of: id).read(RouteSurfaceBreakdown.self, from: surfaceData)
     }
 
+    // MARK: - Strava (#628)
+    // DataModel.md §3.8.1. All optional, so an older store migrates lightly with nil in each.
+
+    /// Set by a Strava import; importing the same route again updates this one in place.
+    /// Kept when Strava is disconnected, with the route the rider chose to keep.
+    var stravaRouteID: String?
+
+    /// JSON `[StravaRouteSegment]`, from Strava's route detail. Deleted when Strava is
+    /// disconnected.
+    var stravaSegmentsData: Data?
+
+    /// When `stravaSegmentsData` was fetched; S20 refetches after seven days.
+    var stravaSegmentsFetchedAt: Date?
+
     // MARK: - Bounding box
     // Flat columns rather than a nested value so a #Predicate can filter on them:
     // #194's map-as-filter has to narrow routes to a viewport without loading polylines.
