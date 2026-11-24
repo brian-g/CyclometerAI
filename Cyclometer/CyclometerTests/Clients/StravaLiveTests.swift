@@ -17,7 +17,9 @@ struct StravaLiveTests {
         let auth = StravaAuthClient(
             connect: { throw StravaAuthError.cancelled },
             accessToken: { token },
-            refreshAccessToken: { _ in throw StravaAuthError.disconnected },
+            // No refresh token here: the retry after a 401 resends the same token, so a token Strava
+            // refuses fails as `StravaError.unauthorized`.
+            refreshAccessToken: { _ in token },
             disconnect: {},
             handleRedirect: { _ in false }
         )
@@ -28,6 +30,16 @@ struct StravaLiveTests {
             now: { Date() }
         ).client
     }()
+
+    /// `jq -r .access_token` prints `null` when the exchange failed, and every test below then
+    /// fails as unauthorized. This one names the cause.
+    @Test("The token is a token, not a failed exchange")
+    func tokenWasPassed() {
+        #expect(
+            !["", "null"].contains(StravaLive.token ?? ""),
+            "STRAVA_LIVE_TOKEN is empty or \"null\": the code exchange failed, so authorize and exchange again"
+        )
+    }
 
     @Test("The athlete's bikes decode")
     func bikes() async throws {
