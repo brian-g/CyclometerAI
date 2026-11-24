@@ -1,7 +1,8 @@
 # Cyclometer — UX Specification
-**Version:** 0.8.1  
-**Date:** 2026-09-17
+**Version:** 0.8.2  
+**Date:** 2026-11-23
 
+**Updated:** 2026-11-23 — §S10 includes the services to sync section.
 **Updated:** 2026-11-22 — §S20 mirrors §S15 (#570): a half-screen map header that fades and stretches with the scroll, the route's name and distance over the fade, the name moving into the toolbar; tapping the map opens a sheet with S15's Map Options (Standard or Satellite, the forecast wind layer, Plain or Grade coloring). Elevation becomes heroes (Ascent, Descent, Steepest; Max Grade leaves the Summary). Weather adds the temperature and humidity ranges and the wind shares for a ride starting now. §W10's wind map keeps 220 pt.  
 **Updated:** 2026-11-22 — §S10 is simpler (#645): its Elevation Profile and Heart Rate Zones are gone, and its Ride Stats become §S15's Summary, led by Distance and Time, with Route its own section. S10 now shows the ride's calories there. Its Name row is now **Title**, and a **Notes** field follows it, both laid out as §S15's Edit sheet.  
 **Updated:** 2026-11-22 — HKWorkout is no longer automatic: §S10's Sync To writes it when S10 closes, only when the rider leaves Apple Health on, like any service, so a ride also sent to Strava doesn't duplicate in Fitness or on Strava. Crash recovery (#277) follows the remembered choice. §S15's Sync section lists Apple Health.  
@@ -41,7 +42,7 @@
 **Updated:** 2026-10-01 — §S07 edit mode built (#141): Add and Done replace the status bar beside the Dynamic Island, the dashboard can't be minimised until Done, widgets shrink into hairline-bordered cards (glass frames bled into each other, so they were dropped at review), and a rider who removes every widget keeps one blank page. Add stays disabled until §S08 (#142).  
 **Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
 **Updated:** 2026-10-02—  Added interaction for the Add Widget sheet
-****Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
+Updated:** 2026-10-01—  Removed the statement about §S5's second page having a full-screen map.
 **Updated:** 2026-09-28 — §S19's list / map toggle leaves the toolbar for a floating glass button at the bottom trailing edge, above the tab bar and a minimised ride (#331).  
 **Updated:** 2026-09-26 — No iPhone workout session (#318, PRD §9.4): §W12's time in zone, when built, accumulates locally from the dashboard's HR readings, not from HealthKit's live zone updates.  
 **Updated:** 2026-09-26 — HKWorkout retry (#277): §S10's workout is retried until it lands — after the next Finish, and at the next launch unless that launch resumes an unfinished ride — including for a ride closed out at launch after a failed save. Rides that ended before this change are not written retroactively, nor is a ride closed out as an orphan at launch, whose end time is the relaunch rather than the ride's.  
@@ -1174,11 +1175,11 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 ### Key Components
 - Map (full route trace in `brPrimary`; placeholder in Design.sketch). A live map, not S14's cached image (#177)
 - **Title** and **Notes** (#645), each labelled above its field as in §S15's Edit sheet. Notes is a multi-line field, four lines tall and growing; it shows any notes the ride already has, is trimmed as Edit trims it, and is saved when the sheet closes, by button or swipe, before the title. Title (formerly the Name row): tapping it focuses the field and opens the keyboard. An unnamed ride's default is its route's name; otherwise the time of day and the ride's shape — "Morning Loop", "Evening Out and Back", "Afternoon Ride" (one way) — led by the town the ride started in once a reverse geocode of the start answers: "Fargo Morning Loop" (#283). The sheet never waits on that lookup: the offline name shows first and is replaced only if the rider hasn't edited the field; a failed or offline lookup keeps it silently. The S12 **Place Names** toggle turns the lookup off. The name is saved when the sheet closes, by button or swipe; a field cleared to nothing saves the default
+- **Sync To** (Phase 2, PRD §8.12) — a section, as Design.sketch — S10 - Ride Summary Sync Options draws it; it replaces the Sync button and Service Sync sheet (see below)
 - **Summary** (#645): §S15's Summary section, the same hero numbers each left out when the ride recorded nothing for it, led by **Distance** and **Time** (moving time, as S15's title block and Avg Speed use it; the ride's time with pauses left out if the stats didn't load), which S15 shows in its title block instead. Then Vehicle Passes, only with radar paired, as a plain row: S10 has no passes sheet. A progress row until the stats load; "This ride's stats couldn't be loaded" if the finalize never lands; and if the finalize landed but the stats read failed, Distance and Time with "The rest of this ride's stats couldn't be loaded" under them. A ride whose live state didn't cover all of it (a resume whose saved track came back late or not at all, or Health's rider read still out or failed) gets Ascent, Descent and Calories from the saved track moments after the finalize: the Summary shows without them and adds them once stored, for up to 30 s, and a backfill that fails leaves them out (#650)
-- **Route**, its own section as on §S15, only for a ride on a route. No link: S10 isn't on the Rides stack
+- **Route**, its own section as on §S15, only for a ride on a route. No link: S10 isn't on the Rides stack. This will be removed.
 - *Removed (#645):* the elevation profile and the HR zone pie. §S15 has both
 - **Sensors** (#391), only when the ride flagged one. Each flagged device appears once (a combo CSC sensor lists both its roles), with "LOW BATTERY" or "UNRELIABLE CONNECTION — CHECK BATTERY OR MOUNT" under it. There is no mid-ride alert, because it would compete with radar alerts; mid-ride, only §S05's quiet Sensors button shows a missing sensor or a low battery. See BLE.md §14.5
-- **Sync To** (Phase 2, PRD §8.12) — a section, as Design.sketch — S10 draws it; it replaces the Sync button and Service Sync sheet (see below)
 - **Finish Ride** — a floating button that closes the sheet to the tabs, where the ride is in S14
 - **Delete** (#452) — a trash button at the leading end of the nav bar, not in the Design.sketch frame. By now the ride is saved, so this is how a rider throws it away. Nothing has gone to Apple Health or any service yet: that happens when S10 closes. An alert confirms first: "Delete This Ride?", "It will be removed from Cyclometer. This can't be undone." Delete closes the sheet without saving the name or the notes, and deletes the ride as §S14's swipe does. Disabled until the stats have loaded: before then the ride's save hasn't landed
 
@@ -1186,11 +1187,12 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 
 ### Sync To (Phase 2)
 
-> **Revised 2026-11-21.** Design.sketch — S10 draws Sync To as a section of the summary, not a sheet behind a Sync
-> button, and the Sketch frame wins. The rider picks the ride's destinations there, and nothing waits on a Sync tap.
+> **Revised 2026-11-23.** Design.sketch — S10 - Ride Summary Sync Options draws Sync To as a section of the summary, not a sheet behind a Sync button, and the Sketch frame wins. The rider picks the ride's destinations there, and nothing waits on a Sync tap.
 
-- One row (or similar) per connected service (Strava first) and **Apple Health**: the destination's mark, its name, and a toggle. A service whose account is disconnected shows "Reconnect" in place of the toggle, opening its S12.1. With no service connected the section is Apple Health alone
-- Each toggle defaults to the rider's last choice for that destination, remembered in AppPreferences; a first ride defaults on
+- One toggle capsule per connected service (Apple Health first) and **Apple Health**: the destination's mark, and its name. A service whose account is disconnected shows a "􁅥" opening its S12.1. With no service connected the section is Apple Health alone.
+- Each toggle defaults to the rider's last choice for that destination, remembered in AppPreferences; Apple Health defaults on
+- Each capsule's background color when selected aligns with the services tuypical branding. Apple Health: #FF0011, Strava: #FC5200, Ride with  GPS: #FA6400, Trailforks: #29691f, Tribos Studio: #581BFF. Text should contrast sufficiently. 
+- Each capsule should use a symbol before the name of the service. Apple Health: figure.run, Strava: cyclometer.brands.strava-icon, Ride with GPS: cyclometer.brands.ride-with-gps-icon, Trailforks: tbd, Tribos studio: tbd
 - **Strava** uploads when S10 closes, by Finish Ride or a swipe, so the name and description edited above go with it. The upload runs in the app, not the sheet: closing S10 never cancels it
 - **Apple Health** is written when S10 closes, with the services, and only when its row is on (below). Not automatic: once a ride can also go to Strava, an automatic Health write duplicates it — Strava's app imports Health workouts, so the ride could land on Strava twice, and Strava's own workout could come back into Fitness beside this one. Health is a destination the rider picks, like any service
 - Progress and failures are on the ride's S15 Sync section and S14's Sync swipe, not here: S10 is gone by the time an upload finishes

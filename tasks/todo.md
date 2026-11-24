@@ -3230,3 +3230,38 @@ and `finalizeWithoutFinishStatsIsOwed` now checks the flag before and after the 
 `LocationOneShotTests.concurrentRequestsAllResolve` failed with no message during a heavily loaded run (every test
 70–100 s, several clones failed to launch the host); it doesn't touch this change and passed on the rerun of the
 three affected suites (95 passed).
+
+---
+
+## #625 — Strava token service (exchange, refresh, revoke, webhook)
+
+Approach (Brian, 2026-11-23): Cloudflare Pages Functions in the acmeapps.xyz repo, with one WAF rate-limit rule.
+The Strava dev app is already registered.
+
+- [x] Checked Strava's docs: `oauth/revoke` (Basic auth, `token`, 200 with no body, found or not) matches the issue;
+      `deauthorize` retires 2027-06-01. The docs don't cover secret rotation or the exact deauth event shape
+- [x] acmeapps.xyz `strava-token-service`: `functions/ride/api/strava/{token,refresh,revoke,webhook}.js`,
+      `lib/strava.js`, `test/strava.test.js` (12 tests, node:test, Strava faked), `docs/strava-token-service.md`
+- [x] Local `wrangler pages dev`: every route checked. Real Strava refusals (fake client id) pass through. Static
+      pages unaffected. Only `strava <endpoint>: <status>` is logged
+- [x] PRD §12 Privacy bullet, §8.12 webhook wording, 0.6.26
+- [x] Brian: set `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` (Production + Preview).
+      At first they were under Production only, and Strava's callback domain had a stray space, which rejected every
+      `acmeapps.xyz` redirect. Both fixed
+- [x] End to end on the preview deploy: token 200 → refresh 200 (same tokens: Strava reissues only under an hour
+      left) → revoke 200 (empty) → refresh 400, old access token 401, code reuse 400. `cyclometer://acmeapps.xyz/strava`
+      passes Strava's redirect check
+- [x] Merged (site PR #6). Webhook subscription created with `scripts/strava-webhook.sh create` (pushed to the site's
+      `main` at Brian's request): Strava's validation GET → 200. Authorize, then Revoke Access on strava.com →
+      Strava's `POST webhook` → 200 (seen in `wrangler pages deployment tail`)
+- [x] Found on the way: Spectrum's Security Shield (CUJO) blocks `acmeapps.xyz` from Brian's network (TLS errors from
+      every CLI client; `http://acmeapps.xyz:443/` redirects to a CUJO block page). Production checked via
+      `acmeapps-xyz.pages.dev` and check-host.net. Brian turned the filter off; a rider on Spectrum with it on would
+      have Strava connect blocked until the domain is recategorised
+- [x] Brian: WAF rate-limit rule (`/ride/api/strava/`, per IP, >20 / 10 s → block 10 s). Burst check: 30th request
+      → 429, static pages unaffected, cleared within 12 s. Spectrum reported; they are unblocking the domain
+
+**Review.** #625's Done-when is met: all four endpoints work against Strava with the dev app, the webhook subscription
+is validated, and deployment and secret rotation are documented in the site repo (`docs/strava-token-service.md`).
+Rotation: Strava's settings have Generate New Client Secret (doc updated). Whether earlier tokens survive a new
+secret is unverified; not a priority before launch.

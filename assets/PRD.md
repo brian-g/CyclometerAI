@@ -50,6 +50,7 @@
 | 0.6.24 | 2026-11-22 | Brian / Claude | HKWorkout no longer automatic. The workout is written when S10 closes with Sync To's Apple Health row on, like any service, so a ride also sent to Strava doesn't duplicate in Fitness or on Strava (Strava's app imports Health workouts). §9.4 and §12 Privacy follow; UX.md §S10. |
 | 0.6.23 | 2026-11-21 | Brian / Claude | Strava (Phase 2). New §8.12: connecting through a stateless token service that holds the client secret, Keychain tokens, uploads chosen per ride in S10's Sync To section, segment efforts on S15, and segments on S20 from a Strava route itself or, for any route, from its previous rides synced to Strava (Explore Segments is closed to Standard-tier apps since 2026-09-01), Strava route import on S19 and S05.2, and gear with Multi-bike later. §6 and §8.6 point to it. |
 | 0.6.22 | 2026-11-19 | Brian / Claude | Orphan workouts (#584). §9.4's #318 decision note: an orphan closed out at relaunch that the rider had already ended keeps its real end time and gets its `HKWorkout` (UX.md §S10). One with no ride-end marker still gets none, since its end is the relaunch. |
+| 0.6.26 | 2026-11-23 | Brian / Claude | Strava token service (#625). §12 Privacy records what the service sees: the code and tokens in transit to Strava, stored and logged nowhere. §8.12 corrects what the webhook does: the stateless service only acknowledges a deauthorization, and the app learns of it from a refused refresh. The service runs as Cloudflare Pages Functions in the acmeapps.xyz repo. |
 
 ---
 
@@ -1047,8 +1048,11 @@ Strava activity history into Cyclometer, and on-device segment detection (Phase 
   granted; it is stored, and a feature whose scope is missing is hidden and named on S12.1 rather than failing
 - **Token service.** Exchanging the code, refreshing and revoking all need the app's `client_secret`, which must not
   ship in the binary. A stateless token service at `acmeapps.xyz/ride/api/strava/` holds it: `token` (code →
-  tokens), `refresh`, `revoke`, and `webhook`, which Strava's API terms require so the app learns of a
-  deauthorization. The service stores no tokens and no athlete data; it forwards to Strava and returns Strava's answer
+  tokens), `refresh`, `revoke`, and `webhook`, which Strava's API terms require. The webhook only acknowledges a
+  deauthorization: with nothing stored it can't tell the app, which learns when Strava refuses its next refresh
+  (below). The service stores no tokens and no athlete data; it forwards to Strava and returns Strava's answer.
+  Built in #625 as Cloudflare Pages Functions in the acmeapps.xyz site repo, whose `docs/strava-token-service.md`
+  covers deployment, the webhook subscription and secret rotation
 - Tokens live in the Keychain (`kSecClassGenericPassword`, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`), never
   in SwiftData or the AppPreferences document, so they don't travel in backups: a restored or new iPhone reconnects
 - Access tokens last six hours. A request refreshes first when the token has under five minutes left, and refreshes
@@ -1446,6 +1450,7 @@ All three tabs are functional in MVP. The Routes tab (S19, S20) came into MVP wi
 - Weather (#148): current conditions and the hourly forecast come from Apple's WeatherKit, which is sent one coordinate per request and nothing else — no account or identifier. Each M10.6 surface says which coordinates it sends (the rider's location, a route's start, or points ahead on a loaded route for rain alerts). The Start sheet (S05.1, #149) sends the start of the chosen route (#559) as it opens and whenever the route changes; with no route it sends the rider's current location, only when location access is already granted. During a ride (W10, #150) it sends the rider's current location when a location fix arrives and the forecast is 10 minutes old, or a minute after a failed request, whether or not W10 is on a page. With a route loaded, each of those forecasts also checks the route ahead for rain (#152), sending up to seven points along the stretch the rider reaches within two hours, one request each: at most about 40 requests an hour. It checks only while the rider is on the route and the dashboard is on screen during a recording ride. Paused, locked, minimised or in the background, it sends nothing. W10's sheet (#561) sends up to seven points ahead along the route when it opens, and not again within 10 minutes. Nothing from either is stored. The current conditions from each of those forecasts are kept with the ride, on the device, for S15's weather summary (#151): nothing more is sent for them. It never asks for access itself, and the privacy policy says so. A failed or offline request leaves that surface's empty state, and WeatherKit data is credited with the Apple Weather mark and legal link wherever it is shown
 - Route narrative (#203): written by Apple's on-device model (`FoundationModels`) from the route's computed terrain. Nothing is sent off the device
 - App Intents (§8.11): ride titles, dates, distances and route names are indexed in Spotlight's on-device index. Siri and Shortcuts read them through the app's intents. Nothing is sent to a server by the app
+- Strava token service (#625, Phase 2, §8.12): connecting Strava sends the authorization code, and afterwards the refresh token (to refresh) or a token (to disconnect), to Cyclometer's token service at `acmeapps.xyz`. The service adds the app's client secret and forwards each to Strava. It sees the code, the tokens and Strava's answer (which includes the athlete's public profile) in transit, and stores and logs none of them. Strava's deauthorization webhook reaches the same service and is acknowledged without being stored. Nothing is sent until the rider connects Strava
 - BLE device identifiers: not transmitted externally
 - No analytics or crash reporting without explicit user consent
 
