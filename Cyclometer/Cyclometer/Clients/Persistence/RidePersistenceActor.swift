@@ -177,6 +177,25 @@ actor RidePersistenceActor {
         }
     }
 
+    /// Deletes the Strava segment efforts cached on every ride, when Strava is disconnected (PRD
+    /// §8.12). The rides' `RideSyncRecord`s stay, so S15 can still link to the activity.
+    func clearStravaCaches() throws {
+        do {
+            let rides = try modelContext.fetch(FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.stravaSegmentEffortsData != nil || $0.stravaSegmentsFetchedAt != nil }
+            ))
+            guard !rides.isEmpty else { return }
+            for ride in rides {
+                ride.stravaSegmentEffortsData = nil
+                ride.stravaSegmentsFetchedAt = nil
+            }
+            try modelContext.save()
+        } catch {
+            logger.error("clearStravaCaches failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// One ride's stored thumbnail (#248). Nil for a ride without one, and for an unknown
     /// id: a row can outlive its ride by the moment a delete takes, and a missing image is
     /// what the row already shows then.

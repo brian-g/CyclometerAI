@@ -141,8 +141,9 @@ struct AppView: View {
         // Hands the rider's persisted pairings to BLECSCClient, which connects
         // nothing it hasn't been told about.
         .task { await store.send(.task).finish() }
-        // "Open in Cyclometer" on a `.gpx` from Files, Mail or Safari.
-        .onOpenURL { store.send(.fileOpened($0)) }
+        // "Open in Cyclometer" on a `.gpx` from Files, Mail or Safari, and Strava's sign-in
+        // redirect from the Strava app.
+        .onOpenURL { store.send(.urlOpened($0)) }
     }
 }
 

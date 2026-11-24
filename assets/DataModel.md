@@ -1400,7 +1400,9 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | SensorSource priority switching | Unit via TCA TestStore | All transitions in priority chain; source badge updates |
 | Wheel auto-calibration math | Unit — WheelCalibrationTests | 2% trigger; 10% cap; out-of-range rejection; GPS accuracy gating |
 | PairedSensor role lookup | Unit — AppPreferencesTests | Correct sensor per role; nil when role unpaired; combo sensor at two roles |
-| ConnectedService Keychain round-trip | Integration — ConnectedServiceTests | Token stored in Keychain; keychainIdentifier retrieves correct token |
+| ConnectedService Keychain round-trip | Integration — ConnectedServiceTests | Token stored in Keychain; keychainIdentifier retrieves correct token; a rewrite replaces; missing item reads nil; `AfterFirstUnlockThisDeviceOnly` |
+| Strava sign-in and refresh | Unit — StravaSessionTests | Ten concurrent `accessToken()` calls refresh once and store the rotated token; a refused refresh (400/401) marks disconnected; a record without its Keychain item is disconnected with no network call; connect saves tokens before the record; disconnect removes item, record and caches even when the revoke fails (#626) |
+| Strava cache clearing | Integration — StravaCachePersistenceTests | Disconnect clears ride segment efforts and route segments; sync records and `stravaRouteID` stay |
 | RideWeatherSample recording and storage | Unit — RideWeatherRecordingTests | Checkpoint, resume and finish keep the samples; none stored reads back empty; a non-finite reading is never recorded |
 | RideSyncRecord encoding/decoding | Unit — RideSyncTests | Round-trips through JSON; correct status transitions; remoteActivityId stored on success |
 

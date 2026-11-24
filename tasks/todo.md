@@ -3286,9 +3286,9 @@ The current store is 1.1.9 (1.1.10's `isHealthWorkoutDeferred` and 1.2 Bikes are
 
 ---
 
-## #626 — Strava sign-in (waiting on #628)
+## #626 — Strava sign-in
 
-Approved plan (2026-11-24), kept here until #628 merges.
+Approved plan (2026-11-24). #628 merged as #657; built on `feat/626-strava-signin`.
 
 Decisions (Brian): #628 first; `StravaAuthClient` owns the `ConnectedService` record (connect saves, a refused refresh
 flags `isDisconnected`, disconnect removes; `connect()` still returns it); the on-device "connect with/without the
@@ -3298,19 +3298,37 @@ Code vs spec: the `cyclometer` scheme isn't registered (`CFBundleURLTypes`), and
 `AppFeature.fileOpened` drops non-file URLs → rename `.urlOpened`, non-file URLs go to `stravaAuth.handleRedirect`;
 TCA §4.15 gains `handleRedirect: (URL) -> Bool`; the forced refresh for a 401 retry is #627's.
 
-- [ ] `Clients/Keychain/KeychainClient.swift`: read/write/delete; generic password, service `xyz.acmeapps.ride.oauth`,
+- [x] `Clients/Keychain/KeychainClient.swift`: read/write/delete; generic password, service `xyz.acmeapps.ride.oauth`,
       update-then-add with `AfterFirstUnlockThisDeviceOnly`, missing item = nil / no-op delete; `OAuthTokens`
-- [ ] `Clients/Strava/StravaSession` actor (injected transport, keychain, clock, `Shared<AppPreferences>`, authorize):
+- [x] `Clients/Strava/StravaSession` actor (injected transport, keychain, clock, `Shared<AppPreferences>`, authorize):
       connect (state nonce, denied, scope from callback, Keychain before record), accessToken (a record whose Keychain
       item is missing → `isDisconnected`, throw `.disconnected`: the record travels in a backup and the tokens don't,
       so a restored or new iPhone gets Reconnect, not an account that silently fails (#628 review); ≥5 min left → as is;
       one in-flight refresh task; rotated token written before return; 400/401 → `isDisconnected`, transient errors
       leave it), disconnect (best-effort revoke, then Keychain, record, `clearStravaCaches()`), handleRedirect
-- [ ] `StravaAuthPresenter`: `strava://oauth/mobile/authorize` when `canOpenURL`, else `ASWebAuthenticationSession`
+- [x] `StravaAuthPresenter`: `strava://oauth/mobile/authorize` when `canOpenURL`, else `ASWebAuthenticationSession`
       (`.customScheme("cyclometer")`); `redirectGrace` after didBecomeActive → `.cancelled`
-- [ ] `AppLinks.stravaTokenService`; `Info.plist` URL type + `LSApplicationQueriesSchemes`; `.urlOpened` routing
-- [ ] `PersistenceClient.clearStravaCaches()` (keeps `stravaRouteID`, sync records)
-- [ ] Tests: `StravaSessionTests` (10 concurrent → 1 refresh; refused → disconnected; record without its Keychain
+- [x] `AppLinks.stravaTokenService`; `Info.plist` URL type + `LSApplicationQueriesSchemes`; `.urlOpened` routing
+- [x] `PersistenceClient.clearStravaCaches()` (keeps `stravaRouteID`, sync records)
+- [x] Tests: `StravaSessionTests` (10 concurrent → 1 refresh; refused → disconnected; record without its Keychain
       item → disconnected, no network call; connect/disconnect paths),
       `ConnectedServiceTests` (live Keychain round-trip), `AppOpenURLTests`
-- [ ] TCA §4.15 / §8, DataModel §10
+- [x] TCA §4.15 / §8, DataModel §10
+- [x] Full `CyclometerTests`: 3167 passed, 3 failed when simulator clones couldn't launch the host ("failed to
+      launch xyz.acmeapps.ride"); all 3 pass on rerun. Commit + PR
+
+Built differently from the plan:
+- Disconnect removes the Keychain item, record and caches *before* the revoke, not after: a request made while
+  the revoke is in flight then finds no record, so it can't start a refresh with the token being revoked and write
+  the answer back. The revoke is still best effort, and every step runs even when one fails
+- `KeychainClient.read` throws on any status but not-found. Reading before the first unlock since boot is
+  `errSecInteractionNotAllowed`; read as "no item", it would mark a working account disconnected
+- connect and disconnect wait out a refresh in flight (`settleRefresh`), so its tokens can't land over a new
+  connection's or after the delete
+- New Logger category `accounts` (sign-in, tokens, Keychain); no existing one covered it
+- Cache-clear test is its own suite, `StravaCachePersistenceTests`
+
+Verified: build clean; `StravaSessionTests`, `ConnectedServiceTests`, `StravaCachePersistenceTests`,
+`AppOpenURLTests` 24/24, each test named in the output. The concurrent test fails with the join in
+`refreshedTokens` removed (checked, then restored). Not verifiable before #629: no screen calls `connect()` yet,
+so the presenter (Strava app and web paths, `redirectGrace`) is unexercised.
