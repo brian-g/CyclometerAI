@@ -3245,7 +3245,11 @@ The Strava dev app is already registered.
 - [x] Local `wrangler pages dev`: every route checked. Real Strava refusals (fake client id) pass through. Static
       pages unaffected. Only `strava <endpoint>: <status>` is logged
 - [x] PRD §12 Privacy bullet, §8.12 webhook wording, 0.6.26
-- [ ] Brian: set `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` (Production + Preview)
-- [ ] End to end on the preview deploy: token → refresh → revoke → refresh refused
+- [x] Brian: set `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` (Production + Preview).
+      At first they were under Production only, and Strava's callback domain had a stray space, which rejected every
+      `acmeapps.xyz` redirect. Both fixed
+- [x] End to end on the preview deploy: token 200 → refresh 200 (same tokens: Strava reissues only under an hour
+      left) → revoke 200 (empty) → refresh 400, old access token 401, code reuse 400. `cyclometer://acmeapps.xyz/strava`
+      passes Strava's redirect check
 - [ ] Merge, create the webhook subscription, deauthorize → POST 200 in Pages logs
 - [ ] WAF rate-limit rule, burst check
