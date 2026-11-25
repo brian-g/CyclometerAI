@@ -1038,3 +1038,27 @@ fucking up the test suite. Let's find it before we rerecord the snapshots."
 Run one failing suite on a freshly created simulator. If it passes there, diff the device's settings rather than the
 code. Record only on the erased "Cyclometer Tests" simulator (`scripts/test-simulator.sh`), and every snapshot passes
 `traits: .snapshot(…)`.
+
+---
+
+## Stated an outside service's limit from memory (2026-11-24, Phase 2 ordering)
+
+**What happened.** Reviewing the Phase 2 milestone order, I said an unreviewed Strava app is capped at one connected
+athlete, so #288 (Strava App Review) blocked every TestFlight tester, and I proposed moving it up. Brian: "Strava
+allows 10 to connect right now." The cap I quoted was out of date, and I recommended a reorder based on it.
+
+**Rule.** Check a third-party limit (quota, cap, rate limit, review rule) against the service's current docs or the
+app's dashboard before a recommendation rests on it. If I can't check, say the number is unverified and don't build a
+change on it.
+
+---
+
+## Repeated a workaround after its cause was gone (2026-11-24, #627)
+
+**What happened.** I told Brian twice to use the pages.dev address for the token service because acmeapps.xyz was
+blocked on this Mac. Brian: "acmeapps.xyz is NOT BLOCKED ON THIS MAC ANY LONGER". The block was a memory from earlier
+the same day. I passed it on as current without checking it.
+
+**Rule.** A memory that describes the environment (a block, an outage, a flaky host) is a snapshot. Before building
+instructions on it, check it with one request. If I can't check, say how old the note is rather than presenting it as
+current.

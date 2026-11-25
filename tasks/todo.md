@@ -3230,3 +3230,143 @@ and `finalizeWithoutFinishStatsIsOwed` now checks the flag before and after the 
 `LocationOneShotTests.concurrentRequestsAllResolve` failed with no message during a heavily loaded run (every test
 70–100 s, several clones failed to launch the host); it doesn't touch this change and passed on the rerun of the
 three affected suites (95 passed).
+
+---
+
+## #625 — Strava token service (exchange, refresh, revoke, webhook)
+
+Approach (Brian, 2026-11-23): Cloudflare Pages Functions in the acmeapps.xyz repo, with one WAF rate-limit rule.
+The Strava dev app is already registered.
+
+- [x] Checked Strava's docs: `oauth/revoke` (Basic auth, `token`, 200 with no body, found or not) matches the issue;
+      `deauthorize` retires 2027-06-01. The docs don't cover secret rotation or the exact deauth event shape
+- [x] acmeapps.xyz `strava-token-service`: `functions/ride/api/strava/{token,refresh,revoke,webhook}.js`,
+      `lib/strava.js`, `test/strava.test.js` (12 tests, node:test, Strava faked), `docs/strava-token-service.md`
+- [x] Local `wrangler pages dev`: every route checked. Real Strava refusals (fake client id) pass through. Static
+      pages unaffected. Only `strava <endpoint>: <status>` is logged
+- [x] PRD §12 Privacy bullet, §8.12 webhook wording, 0.6.26
+- [x] Brian: set `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` (Production + Preview).
+      At first they were under Production only, and Strava's callback domain had a stray space, which rejected every
+      `acmeapps.xyz` redirect. Both fixed
+- [x] End to end on the preview deploy: token 200 → refresh 200 (same tokens: Strava reissues only under an hour
+      left) → revoke 200 (empty) → refresh 400, old access token 401, code reuse 400. `cyclometer://acmeapps.xyz/strava`
+      passes Strava's redirect check
+- [x] Merged (site PR #6). Webhook subscription created with `scripts/strava-webhook.sh create` (pushed to the site's
+      `main` at Brian's request): Strava's validation GET → 200. Authorize, then Revoke Access on strava.com →
+      Strava's `POST webhook` → 200 (seen in `wrangler pages deployment tail`)
+- [x] Found on the way: Spectrum's Security Shield (CUJO) blocks `acmeapps.xyz` from Brian's network (TLS errors from
+      every CLI client; `http://acmeapps.xyz:443/` redirects to a CUJO block page). Production checked via
+      `acmeapps-xyz.pages.dev` and check-host.net. Brian turned the filter off; a rider on Spectrum with it on would
+      have Strava connect blocked until the domain is recategorised
+- [x] Brian: WAF rate-limit rule (`/ride/api/strava/`, per IP, >20 / 10 s → block 10 s). Burst check: 30th request
+      → 429, static pages unaffected, cleared within 12 s. Spectrum reported; they are unblocking the domain
+
+**Review.** #625's Done-when is met: all four endpoints work against Strava with the dev app, the webhook subscription
+is validated, and deployment and secret rotation are documented in the site repo (`docs/strava-token-service.md`).
+Rotation: Strava's settings have Generate New Client Secret (doc updated). Whether earlier tokens survive a new
+secret is unverified; not a priority before launch.
+
+---
+
+## #628 — SwiftData schema 1.3: Strava caches on Ride and Route
+
+Prerequisite for #626 (Brian, 2026-11-24). Optional columns and AppPreferences document fields only; no consumer yet.
+The current store is 1.1.9 (1.1.10's `isHealthWorkoutDeferred` and 1.2 Bikes aren't built), so the Done-when's "1.2 store" means the store this build ships.
+
+- [x] `Models/ConnectedService.swift`: `ConnectedService`, `ExternalService` (moved from `Ride.swift`, + `CaseIterable`),
+      `SyncDestination` with a string raw value so the defaults map encodes as an object and drops unknown keys alone.
+      `RawRepresentable` + `CodingKeyRepresentable` made the custom `encode(to:)` unnecessary: the synthesized encoder
+      writes the map as an object, and only `init(from:)` decodes it as `[String: Bool]`
+- [x] `AppPreferences`: `connectedServices`, `syncDestinationDefaults`; lenient decode
+- [x] `Ride`: `stravaSegmentEffortsData`, `stravaSegmentsFetchedAt`; `SyncStatus.processing`; stale `RideSyncSheetFeature` comments
+- [x] `Route`: `stravaRouteID`, `stravaSegmentsData`, `stravaSegmentsFetchedAt`
+- [x] Tests: legacy-store tests assert the new columns nil; `AppPreferencesTests` decode/round-trip; new `RideSyncTests`
+- [x] DataModel §1 / §3.7 / §3.8 / §9 / OQDM7
+- [ ] Build → Brian runs → full `CyclometerTests` → commit + PR
+
+---
+
+## #626 — Strava sign-in
+
+Approved plan (2026-11-24). #628 merged as #657; built on `feat/626-strava-signin`.
+
+Decisions (Brian): #628 first; `StravaAuthClient` owns the `ConnectedService` record (connect saves, a refused refresh
+flags `isDisconnected`, disconnect removes; `connect()` still returns it); the on-device "connect with/without the
+Strava app; survives relaunch" check moves to #629. Strava client id `300241` (public) → `StravaConfig.clientID`.
+
+Code vs spec: the `cyclometer` scheme isn't registered (`CFBundleURLTypes`), and the Strava-app path needs it;
+`AppFeature.fileOpened` drops non-file URLs → rename `.urlOpened`, non-file URLs go to `stravaAuth.handleRedirect`;
+TCA §4.15 gains `handleRedirect: (URL) -> Bool`; the forced refresh for a 401 retry is #627's.
+
+- [x] `Clients/Keychain/KeychainClient.swift`: read/write/delete; generic password, service `xyz.acmeapps.ride.oauth`,
+      update-then-add with `AfterFirstUnlockThisDeviceOnly`, missing item = nil / no-op delete; `OAuthTokens`
+- [x] `Clients/Strava/StravaSession` actor (injected transport, keychain, clock, `Shared<AppPreferences>`, authorize):
+      connect (state nonce, denied, scope from callback, Keychain before record), accessToken (a record whose Keychain
+      item is missing → `isDisconnected`, throw `.disconnected`: the record travels in a backup and the tokens don't,
+      so a restored or new iPhone gets Reconnect, not an account that silently fails (#628 review); ≥5 min left → as is;
+      one in-flight refresh task; rotated token written before return; 400/401 → `isDisconnected`, transient errors
+      leave it), disconnect (best-effort revoke, then Keychain, record, `clearStravaCaches()`), handleRedirect
+- [x] `StravaAuthPresenter`: `strava://oauth/mobile/authorize` when `canOpenURL`, else `ASWebAuthenticationSession`
+      (`.customScheme("cyclometer")`); `redirectGrace` after didBecomeActive → `.cancelled`
+- [x] `AppLinks.stravaTokenService`; `Info.plist` URL type + `LSApplicationQueriesSchemes`; `.urlOpened` routing
+- [x] `PersistenceClient.clearStravaCaches()` (keeps `stravaRouteID`, sync records)
+- [x] Tests: `StravaSessionTests` (10 concurrent → 1 refresh; refused → disconnected; record without its Keychain
+      item → disconnected, no network call; connect/disconnect paths),
+      `ConnectedServiceTests` (live Keychain round-trip), `AppOpenURLTests`
+- [x] TCA §4.15 / §8, DataModel §10
+- [x] Full `CyclometerTests`: 3167 passed, 3 failed when simulator clones couldn't launch the host ("failed to
+      launch xyz.acmeapps.ride"); all 3 pass on rerun. Commit + PR
+
+Built differently from the plan:
+- Disconnect removes the Keychain item, record and caches *before* the revoke, not after: a request made while
+  the revoke is in flight then finds no record, so it can't start a refresh with the token being revoked and write
+  the answer back. The revoke is still best effort, and every step runs even when one fails
+- `KeychainClient.read` throws on any status but not-found. Reading before the first unlock since boot is
+  `errSecInteractionNotAllowed`; read as "no item", it would mark a working account disconnected
+- connect and disconnect wait out a refresh in flight (`settleRefresh`), so its tokens can't land over a new
+  connection's or after the delete
+- New Logger category `accounts` (sign-in, tokens, Keychain); no existing one covered it
+- Cache-clear test is its own suite, `StravaCachePersistenceTests`
+
+Verified: build clean; `StravaSessionTests`, `ConnectedServiceTests`, `StravaCachePersistenceTests`,
+`AppOpenURLTests` 24/24, each test named in the output. The concurrent test fails with the join in
+`refreshedTokens` removed (checked, then restored). Not verifiable before #629: no screen calls `connect()` yet,
+so the presenter (Strava app and web paths, `redirectGrace`) is unexercised.
+
+---
+
+## #627 StravaClient: transport, models, rate limits
+
+Plan: StravaAuthClient gains `refreshAccessToken(rejected:)`; StravaClient (8 endpoints) with bearer, one retry
+after 401, rate-limit headers, 429 → `rateLimited(until:)` (quarter hour, or midnight UTC when a daily limit is spent).
+Fixtures synthesized from Strava's reference (repo is public); an opt-in live test checks real answers.
+
+- [x] `refreshAccessToken(rejected:)` on StravaAuthClient / StravaSession + tests
+- [x] StravaModels (domain), StravaWire (Strava JSON → domain)
+- [x] StravaRateLimit (pure) + tests
+- [x] StravaGzip + tests
+- [x] StravaClient live (`StravaAPI`), testValue, `+Mock`
+- [x] Fixtures + StravaClientTests (decode every endpoint, 401 retry, 429)
+- [x] StravaLiveTests (opt-in, env-gated)
+- [x] Docs: TCA §4.15, §8; PRD §8.12 + changelog
+- [x] Build, suites, mutation check of the retry, full CyclometerTests
+
+### Review
+
+- `StravaAuthClient.refreshAccessToken(rejected:)`: forced refresh after a 401; returns the stored token when another
+  request already replaced the rejected one, so concurrent 401s rotate once.
+- `StravaClient` live value is `StravaAPI`; Strava JSON lives in `StravaWire` (private DTOs → DataModel §3.8.1
+  models). Route `type` passed through: undocumented values, #634 filters after the live check.
+- Verified: build clean; StravaClientTests 26, StravaRateLimitTests 12, StravaGzipTests 2, StravaSessionTests 18,
+  each counted in the log; StravaLiveTests 4 skipped (no token). With the 401 retry disabled, both 401 tests fail
+  (checked, then restored). Full CyclometerTests: 3213 passed, 1 failed — `RideSummaryFeatureTests/
+  finishStatsNeverStored` amid a host stall (neighbours all ~47 s); 31/31 when the suite reran alone.
+- Live check (Brian, 2026-11-24): StravaLiveTests 5/5 against Strava. 10 routes, all type 1 / subType 1 (no run
+  routes to compare, so #634 should keep `type == 1` rather than drop a guessed run value); route detail 1 segment,
+  GPX 45,860 bytes; 2 bikes; an activity with 49 efforts, 0 PRs, 0 with a best (expected for a free account).
+- Best time (2026-11-25): `StravaLiveTests.answerShapes` printed the key paths of real answers. Neither the
+  activity's efforts (a ride with 4 PRs, visibility everyone, subscriber account) nor a route's segments carry
+  `athlete_segment_stats` / `athlete_pr_effort`, whatever Strava's reference shows. `StravaWire` no longer reads a best
+  time; the fixtures follow the real keys and the `-free` variants are gone. `pr_rank` decoded on the real ride (4/4).
+  A first effort on a segment gets no `pr_rank` or achievement. PRD §8.12, UX S15/S20, DataModel §3.8.1 and TCA §4.15
+  updated; whether `GET /segments/:id` carries the best time is left to #633.

@@ -1,0 +1,274 @@
+{
+  "id": 9000000001,
+  "resource_state": 3,
+  "external_id": "6F9619FF-8B86-D011-B42D-00C04FC964FF.gpx.gz",
+  "upload_id": 2000000001,
+  "athlete": {
+    "id": 134815,
+    "resource_state": 1
+  },
+  "name": "Morning Ride",
+  "distance": 28099.0,
+  "moving_time": 4207,
+  "elapsed_time": 4410,
+  "total_elevation_gain": 516.0,
+  "type": "Ride",
+  "sport_type": "Ride",
+  "start_date": "2026-11-21T14:02:13Z",
+  "start_latlng": [
+    37.83,
+    -122.26
+  ],
+  "end_latlng": [
+    37.83,
+    -122.26
+  ],
+  "segment_efforts": [
+    {
+      "id": 2801117331,
+      "resource_state": 2,
+      "name": "Grizzly Peak Climb",
+      "activity": {
+        "id": 9000000001,
+        "id_str": "9000000001",
+        "visibility": "everyone",
+        "resource_state": 1
+      },
+      "athlete": {
+        "id": 134815,
+        "id_str": "134815",
+        "resource_state": 1
+      },
+      "elapsed_time": 1052,
+      "moving_time": 1040,
+      "start_date": "2026-11-21T14:40:02Z",
+      "start_date_local": "2026-11-21T06:40:02Z",
+      "distance": 3420.5,
+      "start_index": 2280,
+      "end_index": 3332,
+      "device_watts": false,
+      "segment": {
+        "id": 673683,
+        "resource_state": 2,
+        "name": "Grizzly Peak Climb",
+        "activity_type": "Ride",
+        "distance": 3412.8,
+        "average_grade": 6.4,
+        "maximum_grade": 12.1,
+        "elevation_high": 512.0,
+        "elevation_low": 293.0,
+        "start_latlng": [
+          37.8702,
+          -122.2541
+        ],
+        "end_latlng": [
+          37.8811,
+          -122.2433
+        ],
+        "climb_category": 2,
+        "city": "Berkeley",
+        "state": "CA",
+        "country": "United States",
+        "private": false,
+        "hazardous": false,
+        "starred": false,
+        "elevation_profile": null,
+        "elevation_profiles": null
+      },
+      "kom_rank": 7,
+      "pr_rank": 1,
+      "achievements": [
+        {
+          "type_id": 3,
+          "type": "pr",
+          "rank": 1
+        }
+      ],
+      "hidden": false,
+      "average_cadence": 82.4,
+      "average_heartrate": 151.2,
+      "max_heartrate": 168.0,
+      "visibility": "everyone"
+    },
+    {
+      "id": 2801117330,
+      "resource_state": 2,
+      "name": "Tunnel Road",
+      "activity": {
+        "id": 9000000001,
+        "id_str": "9000000001",
+        "visibility": "everyone",
+        "resource_state": 1
+      },
+      "athlete": {
+        "id": 134815,
+        "id_str": "134815",
+        "resource_state": 1
+      },
+      "elapsed_time": 412,
+      "moving_time": 412,
+      "start_date": "2026-11-21T14:20:44Z",
+      "start_date_local": "2026-11-21T06:20:44Z",
+      "distance": 1830.0,
+      "start_index": 1110,
+      "end_index": 1522,
+      "segment": {
+        "id": 365235,
+        "resource_state": 2,
+        "name": "Tunnel Road",
+        "activity_type": "Ride",
+        "distance": 1826.4,
+        "average_grade": 4.1,
+        "maximum_grade": 8.0,
+        "elevation_high": 290.0,
+        "elevation_low": 215.0,
+        "start_latlng": [
+          37.8581,
+          -122.2402
+        ],
+        "end_latlng": [
+          37.8655,
+          -122.2265
+        ],
+        "climb_category": 0,
+        "private": false,
+        "city": "Berkeley",
+        "state": "CA",
+        "country": "United States",
+        "hazardous": false,
+        "starred": false,
+        "elevation_profile": null,
+        "elevation_profiles": null
+      },
+      "kom_rank": null,
+      "pr_rank": 3,
+      "achievements": [
+        {
+          "type_id": 3,
+          "type": "pr",
+          "rank": 3
+        }
+      ],
+      "hidden": false,
+      "device_watts": false,
+      "average_cadence": 82.4,
+      "average_heartrate": 151.2,
+      "max_heartrate": 168.0,
+      "visibility": "everyone"
+    },
+    {
+      "id": 2801117332,
+      "resource_state": 2,
+      "name": "Skyline Descent",
+      "activity": {
+        "id": 9000000001,
+        "id_str": "9000000001",
+        "visibility": "everyone",
+        "resource_state": 1
+      },
+      "athlete": {
+        "id": 134815,
+        "id_str": "134815",
+        "resource_state": 1
+      },
+      "elapsed_time": 201,
+      "moving_time": 201,
+      "start_date": "2026-11-21T15:02:00Z",
+      "start_date_local": "2026-11-21T07:02:00Z",
+      "distance": 2010.0,
+      "start_index": 3800,
+      "end_index": 4001,
+      "segment": {
+        "id": 990011,
+        "resource_state": 2,
+        "name": "Skyline Descent",
+        "activity_type": "Ride",
+        "distance": 2008.0,
+        "average_grade": -5.2,
+        "maximum_grade": 1.0,
+        "start_latlng": [],
+        "end_latlng": [],
+        "climb_category": 0,
+        "private": true,
+        "city": "Berkeley",
+        "state": "CA",
+        "country": "United States",
+        "hazardous": false,
+        "starred": false,
+        "elevation_profile": null,
+        "elevation_profiles": null,
+        "elevation_high": 300.0,
+        "elevation_low": 200.0
+      },
+      "kom_rank": null,
+      "pr_rank": null,
+      "achievements": [],
+      "hidden": false,
+      "device_watts": false,
+      "average_cadence": 82.4,
+      "average_heartrate": 151.2,
+      "max_heartrate": 168.0,
+      "visibility": "everyone"
+    },
+    {
+      "id": 2801117333,
+      "resource_state": 2,
+      "name": "Tunnel Road Upper",
+      "activity": {
+        "id": 9000000001,
+        "id_str": "9000000001",
+        "visibility": "everyone",
+        "resource_state": 1
+      },
+      "athlete": {
+        "id": 134815,
+        "id_str": "134815",
+        "resource_state": 1
+      },
+      "elapsed_time": 230,
+      "moving_time": 412,
+      "start_date": "2026-11-21T14:20:44Z",
+      "start_date_local": "2026-11-21T06:20:44Z",
+      "distance": 1830.0,
+      "start_index": 1600,
+      "end_index": 1830,
+      "segment": {
+        "id": 365236,
+        "resource_state": 2,
+        "name": "Tunnel Road Upper",
+        "activity_type": "Ride",
+        "distance": 980.2,
+        "average_grade": 5.3,
+        "maximum_grade": 8.0,
+        "elevation_high": 290.0,
+        "elevation_low": 215.0,
+        "start_latlng": [
+          37.8655,
+          -122.2265
+        ],
+        "end_latlng": [
+          37.869,
+          -122.2201
+        ],
+        "climb_category": 0,
+        "private": false,
+        "city": "Berkeley",
+        "state": "CA",
+        "country": "United States",
+        "hazardous": false,
+        "starred": false,
+        "elevation_profile": null,
+        "elevation_profiles": null
+      },
+      "kom_rank": null,
+      "pr_rank": null,
+      "achievements": [],
+      "hidden": true,
+      "device_watts": false,
+      "average_cadence": 82.4,
+      "average_heartrate": 151.2,
+      "max_heartrate": 168.0,
+      "visibility": "everyone"
+    }
+  ]
+}

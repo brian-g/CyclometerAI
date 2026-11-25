@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx creator="StravaGPX" version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+ <metadata>
+  <name>Berkeley Hills Loop</name>
+ </metadata>
+ <trk>
+  <name>Berkeley Hills Loop</name>
+  <trkseg>
+   <trkpt lat="37.8702" lon="-122.2541"><ele>293.0</ele></trkpt>
+   <trkpt lat="37.8756" lon="-122.2487"><ele>402.0</ele></trkpt>
+   <trkpt lat="37.8811" lon="-122.2433"><ele>512.0</ele></trkpt>
+  </trkseg>
+ </trk>
+</gpx>

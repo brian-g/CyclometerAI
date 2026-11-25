@@ -117,7 +117,7 @@ final class Ride {
     var isHealthWorkoutOwed: Bool = false
 
     // MARK: - Sync Status
-    // Per-service sync tracking. Written by RideSyncSheetFeature after upload.
+    // Per-service sync tracking. Written by SyncQueueFeature (TCA.md §4.15) as uploads run.
     @Attribute(.externalStorage)
     var syncRecordsData: Data?
 
@@ -129,6 +129,14 @@ final class Ride {
     func syncRecord(for service: ExternalService) -> RideSyncRecord? {
         syncRecords.first { $0.service == service }
     }
+
+    // MARK: - Strava (#628)
+    // The segment efforts Strava matched on this ride's activity, cached for S15 and S20
+    // (DataModel.md §3.8.1). JSON `[StravaSegmentEffort]`: nil = never fetched, `[]` = none.
+    // Deleted when Strava is disconnected; the sync records above stay. Both optional, so an
+    // older store migrates lightly with nil in each.
+    var stravaSegmentEffortsData: Data?
+    var stravaSegmentsFetchedAt: Date?
 
     // MARK: - State
     var recordingState: RecordingState
@@ -274,7 +282,7 @@ enum WeatherCondition: String, Codable, Sendable {
     case clear, partlyCloudy, cloudy, foggy, drizzle, rain, heavyRain, snow, thunderstorm
 }
 
-/// Per-service sync record stored on Ride. Written by RideSyncSheetFeature after upload.
+/// Per-service sync record stored on Ride. Written by SyncQueueFeature (TCA.md §4.15) as uploads run.
 /// Phase 2 — structure defined in MVP for architecture continuity.
 struct RideSyncRecord: Codable, Sendable {
     var service: ExternalService
@@ -287,15 +295,7 @@ struct RideSyncRecord: Codable, Sendable {
 enum SyncStatus: String, Codable, Sendable {
     case pending    // Not yet attempted
     case uploading  // In progress
+    case processing // Uploaded; awaiting the service's activity id, so a ride quit mid-poll resumes polling (#628)
     case synced     // Successfully uploaded
     case failed     // Upload failed; see RideSyncRecord.errorMessage
-}
-
-/// DataModel.md §3.8's ConnectedService is deferred to M13/Phase 2, but
-/// RideSyncRecord.service needs this enum now for architecture continuity.
-enum ExternalService: String, Codable, Sendable {
-    case strava
-    case rideWithGPS
-    case tribosDotStudio
-    case komoot
 }

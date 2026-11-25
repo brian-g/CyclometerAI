@@ -28,6 +28,7 @@ struct AppFeature {
     @Dependency(\.rideEndIntentClient) var rideEndIntentClient
     @Dependency(\.date) var date
     @Dependency(\.healthKitClient) var healthKitClient
+    @Dependency(\.stravaAuth) var stravaAuth
 
     @ObservableState
     struct State: Equatable {
@@ -86,9 +87,10 @@ struct AppFeature {
     enum Action {
         case task
         case tabSelected(Tab)
-        /// A `.gpx` handed over by Files, Mail or Safari (`CFBundleDocumentTypes`), which
-        /// the app imports through the same path as the in-app picker.
-        case fileOpened(URL)
+        /// A URL the system opened the app with: a `.gpx` handed over by Files, Mail or Safari
+        /// (`CFBundleDocumentTypes`), which the app imports through the same path as the in-app
+        /// picker, or Strava's sign-in redirect from the Strava app (`CFBundleURLTypes`).
+        case urlOpened(URL)
         case startRideButtonTapped
         case startSheet(PresentationAction<StartSheetFeature.Action>)
         case rideSummary(PresentationAction<RideSummaryFeature.Action>)
@@ -230,10 +232,18 @@ struct AppFeature {
                 state.selectedTab = tab
                 return .none
 
-            case .fileOpened(let url):
-                // GPX is the only declared document type, so anything arriving here is a
-                // route. A non-file URL would be a custom scheme the app doesn't register.
-                guard url.isFileURL else { return .none }
+            case .urlOpened(let url):
+                // The `cyclometer` scheme is registered only for Strava's redirect, which the
+                // sign-in waiting in `StravaAuthClient` takes. Nothing else changes: the rider is
+                // back where they tapped Connect.
+                guard url.isFileURL else {
+                    return .run { _ in
+                        if await !stravaAuth.handleRedirect(url) {
+                            Logger.cyclometer(.accounts).notice("ignored an opened URL the app doesn't handle")
+                        }
+                    }
+                }
+                // GPX is the only declared document type, so any file arriving here is a route.
                 state.selectedTab = .routes
                 // Straight to the list: a route detail left on the stack would hide the row
                 // the import is about to insert, and the failure alert with it.
