@@ -50,6 +50,7 @@ enum StravaWire {
     static func segmentEfforts(from data: Data) throws -> [StravaSegmentEffort] {
         let activity = try decode(Activity.self, from: data)
         return (activity.segmentEfforts ?? [])
+            .compactMap(\.value)
             .compactMap(effort)
             .sorted { $0.startIndex < $1.startIndex }
     }
@@ -83,13 +84,13 @@ enum StravaWire {
 
     /// One page of `GET /athletes/:id/routes`.
     static func routes(from data: Data) throws -> [StravaRouteSummary] {
-        try decode([Route].self, from: data).map(\.summary)
+        try decode([Row<Route>].self, from: data).compactMap { $0.value?.summary }
     }
 
     /// `GET /routes/:id`.
     static func routeDetail(from data: Data) throws -> StravaRouteDetail {
         let route = try decode(Route.self, from: data)
-        let segments = (route.segments ?? []).map { segment in
+        let segments = (route.segments ?? []).compactMap(\.value).map { segment in
             StravaRouteSegment(
                 segmentID: String(segment.id),
                 name: segment.name,
@@ -105,7 +106,7 @@ enum StravaWire {
 
     /// The bikes in `GET /athlete`.
     static func bikes(from data: Data) throws -> [StravaGear] {
-        (try decode(Athlete.self, from: data).bikes ?? []).map { gear in
+        (try decode(Athlete.self, from: data).bikes ?? []).compactMap(\.value).map { gear in
             StravaGear(
                 gearID: gear.id,
                 name: gear.name ?? "",
@@ -148,8 +149,23 @@ private extension StravaWire {
         var activityId: Int64?
     }
 
+    /// One row of an array answer: nil when it doesn't decode, so a malformed row is dropped
+    /// alone rather than failing the answer. Logs where it broke, never the row.
+    struct Row<Value: Decodable>: Decodable {
+        var value: Value?
+
+        init(from decoder: any Decoder) throws {
+            do {
+                value = try Value(from: decoder)
+            } catch let error as DecodingError {
+                logger.notice("dropped a Strava \(String(describing: Value.self), privacy: .public) row: \(error.codingPathDescription, privacy: .public)")
+                value = nil
+            }
+        }
+    }
+
     struct Activity: Decodable {
-        var segmentEfforts: [Effort]?
+        var segmentEfforts: [Row<Effort>]?
     }
 
     struct Effort: Decodable {
@@ -182,7 +198,7 @@ private extension StravaWire {
         var isPrivate: Bool?
         var starred: Bool?
         var updatedAt: String?
-        var segments: [Segment]?
+        var segments: [Row<Segment>]?
 
         enum CodingKeys: String, CodingKey {
             case id, idStr, name, distance, elevationGain, type, subType, starred, updatedAt, segments
@@ -205,7 +221,7 @@ private extension StravaWire {
     }
 
     struct Athlete: Decodable {
-        var bikes: [Gear]?
+        var bikes: [Row<Gear>]?
     }
 
     struct Gear: Decodable {
@@ -229,7 +245,8 @@ private extension StravaWire {
 }
 
 private extension DecodingError {
-    /// The key path where decoding stopped, e.g. `segment_efforts[3].segment.id`, without values.
+    /// The key path where decoding stopped, without values: the Swift names, after the snake-case
+    /// conversion, e.g. `segmentEfforts.Index 3.segment.id`.
     var codingPathDescription: String {
         let path: [any CodingKey]
         switch self {

@@ -87,4 +87,17 @@ struct StravaRateLimitTests {
         #expect(overallDailySpent.resetDate(after: now) == midnight)
         #expect(readDailySpent.resetDate(after: now) == midnight)
     }
+
+    @Test("An upload counts against the overall limit only, so a spent read count doesn't hold it until midnight")
+    func uploadResetDate() throws {
+        let now = try Self.date("2027-01-15T08:05:00Z")
+        let quarter = try Self.date("2027-01-15T08:15:00Z")
+        let midnight = try Self.date("2027-01-16T00:00:00Z")
+
+        let readDailySpent = StravaRateLimit(overall: Self.windows((200, 200), (1500, 2000)), read: Self.windows((10, 100), (1000, 1000)))
+        let overallDailySpent = StravaRateLimit(overall: Self.windows((20, 200), (2000, 2000)), read: Self.windows((10, 100), (800, 1000)))
+
+        #expect(readDailySpent.resetDate(after: now, isUpload: true) == quarter)
+        #expect(overallDailySpent.resetDate(after: now, isUpload: true) == midnight)
+    }
 }

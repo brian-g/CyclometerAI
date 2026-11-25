@@ -44,16 +44,18 @@ struct StravaRateLimit: Equatable, Sendable {
         if overall == nil && read == nil { return nil }
     }
 
-    /// Whether a daily count has reached its limit, so nothing succeeds before midnight UTC.
-    var isDailySpent: Bool {
-        overall?.daily.isSpent == true || read?.daily.isSpent == true
+    /// Whether a daily count that applies to the request has reached its limit, so it can't
+    /// succeed before midnight UTC. An upload counts only against `overall`, so a spent `read`
+    /// count doesn't hold it.
+    func isDailySpent(isUpload: Bool = false) -> Bool {
+        overall?.daily.isSpent == true || (!isUpload && read?.daily.isSpent == true)
     }
 
-    /// When a refused request may be tried again: midnight UTC when a daily count is spent,
-    /// otherwise the next quarter hour. Strictly after `now`, since the window `now` falls in is
-    /// the one that refused.
-    func resetDate(after now: Date) -> Date {
-        isDailySpent ? Self.nextMidnightUTC(after: now) : Self.nextQuarterHour(after: now)
+    /// When a refused request may be tried again: midnight UTC when a daily count that applies to
+    /// it is spent, otherwise the next quarter hour. Strictly after `now`, since the window `now`
+    /// falls in is the one that refused.
+    func resetDate(after now: Date, isUpload: Bool = false) -> Date {
+        isDailySpent(isUpload: isUpload) ? Self.nextMidnightUTC(after: now) : Self.nextQuarterHour(after: now)
     }
 
     /// :00, :15, :30 or :45, whichever comes next after `now`.

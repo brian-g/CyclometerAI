@@ -2,9 +2,10 @@ import Foundation
 import Testing
 @testable import Cyclometer
 
-/// `StravaClient`'s decoders against Strava itself (#627). The fixtures are built from Strava's
-/// reference, so this is what proves they match real answers. Off unless a token is passed, so it
-/// never runs in CI. It only reads, and writes and stores nothing.
+/// `StravaClient`'s decoders against Strava itself (#627). The fixtures' values are made up, and
+/// their keys follow the real answers this suite printed (`answerShapes`), so this is what proves
+/// the decoders still match Strava. Off unless a token is passed, so it never runs in CI. It only
+/// reads, and writes and stores nothing.
 ///
 /// Set in the shell that runs `xcodebuild test`; xcodebuild strips `TEST_RUNNER_` before the test sees it:
 /// - `TEST_RUNNER_STRAVA_LIVE_TOKEN`: an access token with `read,read_all,profile:read_all,activity:read_all`
@@ -17,8 +18,8 @@ struct StravaLiveTests {
         let auth = StravaAuthClient(
             connect: { throw StravaAuthError.cancelled },
             accessToken: { token },
-            // No refresh token here: the retry after a 401 resends the same token, so a token Strava
-            // refuses fails as `StravaError.unauthorized`.
+            // No refresh token here: the "refresh" after a 401 hands back the same token, which
+            // isn't resent, so a token Strava refuses fails as `StravaError.unauthorized`.
             refreshAccessToken: { _ in token },
             disconnect: {},
             handleRedirect: { _ in false }

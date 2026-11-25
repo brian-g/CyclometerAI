@@ -937,7 +937,7 @@ struct StravaClient {
 after a 401 with `refreshAccessToken(rejected:)`. A token that is still good by the clock can be revoked, and
 concurrent 401s refresh once. It reads the `X-RateLimit-*` / `X-ReadRateLimit-*` headers (`StravaRateLimit`) and
 throws `StravaError.rateLimited(until:)` on a 429. `until` is the next midnight UTC when a daily count is spent,
-otherwise the next quarter hour. Its other errors are `.unauthorized` (a 401 after the refresh), `.http(status:)`
+otherwise the next quarter hour; an upload counts only against the overall limit, so a spent read count doesn't hold it. Its other errors are `.unauthorized` (a 401 after the refresh), `.http(status:)`
 and `.invalidResponse`; a missing or disconnected account throws `StravaAuthError`. Uploads are multipart, the GPX
 gzipped (`gpx.gz`, `sport_type=Ride`). `StravaWire` decodes Strava's JSON into the cached models
 (DataModel.md §3.8.1). It reads no best time: Strava's activity and route answers don't carry one, whatever its

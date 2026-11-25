@@ -51,15 +51,17 @@ struct StravaClientTests {
         }
     }
 
-    /// `StravaAuthClient`: hands out `a1`, and `a2` once refreshed.
+    /// `StravaAuthClient`: hands out `a1`, and `refreshed` (`a2` by default) once refreshed.
     final class Auth: Sendable {
         let token = LockIsolated("a1")
         /// The token each forced refresh was asked to replace.
         let rejected = LockIsolated<[String]>([])
         let failure: StravaAuthError?
+        let refreshed: String
 
-        init(failure: StravaAuthError? = nil) {
+        init(failure: StravaAuthError? = nil, refreshed: String = "a2") {
             self.failure = failure
+            self.refreshed = refreshed
         }
 
         var client: StravaAuthClient {
@@ -71,8 +73,8 @@ struct StravaClientTests {
                 },
                 refreshAccessToken: { [self] old in
                     rejected.withValue { $0.append(old) }
-                    token.setValue("a2")
-                    return "a2"
+                    token.setValue(refreshed)
+                    return refreshed
                 },
                 disconnect: {},
                 handleRedirect: { _ in false }
@@ -92,6 +94,13 @@ struct StravaClientTests {
         return try Data(contentsOf: url)
     }
     private final class BundleToken {}
+
+    /// A fixture with `text`, which must be in it, replaced: a malformed answer from a good one.
+    static func fixture(_ name: String, replacing text: String, with replacement: String) throws -> Data {
+        let json = try #require(String(data: try fixture(name), encoding: .utf8))
+        try #require(json.contains(text), "\(text) is not in \(name).json")
+        return Data(json.replacingOccurrences(of: text, with: replacement).utf8)
+    }
 
     static func ok(_ name: String, _ ext: String = "json") throws -> [Server.Answer] {
         [Server.Answer(status: 200, body: try fixture(name, ext))]
@@ -192,6 +201,15 @@ struct StravaClientTests {
         ])
     }
 
+    @Test("A malformed effort is dropped alone, not the whole answer")
+    func malformedEffortDropped() async throws {
+        let server = Server(["GET /api/v3/activities/9000000001": [
+            Server.Answer(status: 200, body: try Self.fixture("strava-activity-efforts", replacing: #""elapsed_time": 1052,"#, with: "")),
+        ]])
+
+        #expect(try await Self.makeClient(server).segmentEfforts("9000000001") == [Self.tunnelRoad])
+    }
+
     @Test("An activity with no efforts decodes as none")
     func noSegmentEfforts() async throws {
         let server = Server(["GET /api/v3/activities/9000000001": try Self.ok("strava-activity-no-efforts")])
@@ -223,6 +241,15 @@ struct StravaClientTests {
         #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems == [
             URLQueryItem(name: "page", value: "2"), URLQueryItem(name: "per_page", value: "30"),
         ])
+    }
+
+    @Test("A malformed route is dropped from its page, not the whole page")
+    func malformedRouteDropped() async throws {
+        let server = Server(["GET /api/v3/athletes/134815/routes": [
+            Server.Answer(status: 200, body: try Self.fixture("strava-routes-page", replacing: #""name" : "Lake Run""#, with: #""name" : null"#)),
+        ]])
+
+        #expect(try await Self.makeClient(server).routes(1).map(\.routeID) == ["3344024577052366532"])
     }
 
     @Test("Without a connected athlete, routes aren't requested")
@@ -310,6 +337,16 @@ struct StravaClientTests {
         #expect(server.requests.value.count == 2)
     }
 
+    @Test("A refresh that hands back the rejected token fails as unauthorized without resending")
+    func unchangedRefreshIsNotResent() async throws {
+        let auth = Auth(refreshed: "a1")
+        let server = Server(["GET /api/v3/athlete": [Server.Answer(status: 401, body: Data())]])
+
+        await #expect(throws: StravaError.unauthorized) { try await Self.makeClient(server, auth: auth).bikes() }
+        #expect(auth.rejected.value == ["a1"])
+        #expect(server.authorizations == ["Bearer a1"])
+    }
+
     @Test("An account that can't sign a request fails before calling Strava")
     func disconnectedPassesThrough() async throws {
         let server = Server()
@@ -344,6 +381,15 @@ struct StravaClientTests {
 
         await #expect(throws: StravaError.rateLimited(until: try Self.date("2027-01-16T00:00:00Z"))) {
             try await Self.makeClient(server).bikes()
+        }
+    }
+
+    @Test("An upload refused with only the read daily count spent waits for the quarter hour, not midnight")
+    func uploadIgnoresReadDailyLimit() async throws {
+        let server = Server(["POST /api/v3/uploads": Self.limited(overallUsage: "201,1500", readUsage: "40,1000")])
+
+        await #expect(throws: StravaError.rateLimited(until: Self.now.addingTimeInterval(15 * 60))) {
+            try await Self.makeClient(server).upload(StravaUpload(gpx: Data("<gpx/>".utf8), name: "Ride", externalID: "x"))
         }
     }
 

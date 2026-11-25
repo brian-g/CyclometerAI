@@ -5,11 +5,15 @@
 # No token is printed or stored.
 #
 # Usage: scripts/strava-live-check.sh   (from any directory)
+#
+# The activity and route default to a public ride and route on the maintainer's Strava account, published on
+# purpose. To check others: STRAVA_LIVE_ACTIVITY_ID=… STRAVA_LIVE_ROUTE_ID=… scripts/strava-live-check.sh
 
+set -o pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-export TEST_RUNNER_STRAVA_LIVE_ACTIVITY_ID=20847838659
-export TEST_RUNNER_STRAVA_LIVE_ROUTE_ID=3533551710894699610
+export TEST_RUNNER_STRAVA_LIVE_ACTIVITY_ID="${STRAVA_LIVE_ACTIVITY_ID:-20847838659}"
+export TEST_RUNNER_STRAVA_LIVE_ROUTE_ID="${STRAVA_LIVE_ROUTE_ID:-3533551710894699610}"
 
 open 'https://www.strava.com/oauth/authorize?client_id=300241&response_type=code&redirect_uri=https://acmeapps.xyz/ride/&scope=read,read_all,profile:read_all,activity:read_all&approval_prompt=force'
 
@@ -39,4 +43,4 @@ echo "Building"
 cd Cyclometer || exit 1
 xcodebuild test -project Cyclometer.xcodeproj -scheme Cyclometer \
   -destination "id=$(../scripts/test-simulator.sh)" -collect-test-diagnostics never \
-  -only-testing:CyclometerTests/StravaLiveTests 2>&1 | grep -E "strava live:|Test case|error"
+  -only-testing:CyclometerTests/StravaLiveTests 2>&1 | grep -E "strava live:|Test case|error|failed"

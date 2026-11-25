@@ -74,7 +74,7 @@ struct StravaAPI: Sendable {
         form.addFile("file", filename: "\(upload.externalID).gpx.gz", contentType: "application/gzip", data: try upload.gpx.gzipped())
 
         let (data, status) = try await perform(Request(
-            name: "upload", method: "POST", path: "uploads", body: form.body, contentType: form.contentType
+            name: "upload", method: "POST", path: "uploads", body: form.body, contentType: form.contentType, isUpload: true
         ))
         if (200..<300).contains(status) || status == 400, let id = (try? StravaWire.upload(from: data))?.id {
             if status == 400 { logger.notice("strava upload answered 400; polling reports why") }
@@ -94,6 +94,8 @@ struct StravaAPI: Sendable {
         var query: [URLQueryItem] = []
         var body: Data?
         var contentType: String?
+        /// `POST /uploads`, which counts against the overall rate limit only, not the read one.
+        var isUpload = false
 
         func urlRequest(token: String) -> URLRequest {
             var url = StravaConfig.apiBaseURL.appending(path: path)
@@ -115,14 +117,18 @@ struct StravaAPI: Sendable {
     }
 
     /// Sends a signed request and answers with its body and status. A 401 is retried once with a
-    /// refreshed token: Strava revokes tokens the clock can't know about. A 401 after that throws
-    /// `.unauthorized`, and a 429 throws `.rateLimited`. Other statuses are the caller's.
+    /// refreshed token: Strava revokes tokens the clock can't know about. Strava's refresh hands
+    /// back the same token while it has over an hour left, and resending that only spends the
+    /// shared rate limit, so it isn't resent. A 401 after the refresh throws `.unauthorized`, and a
+    /// 429 throws `.rateLimited`. Other statuses are the caller's.
     private func perform(_ request: Request) async throws -> (Data, Int) {
         let token = try await auth.accessToken()
         var (data, response) = try await transport.send(request.urlRequest(token: token))
         if response.statusCode == 401 {
             let refreshed = try await auth.refreshAccessToken(token)
-            (data, response) = try await transport.send(request.urlRequest(token: refreshed))
+            if refreshed != token {
+                (data, response) = try await transport.send(request.urlRequest(token: refreshed))
+            }
         }
 
         let rateLimit = StravaRateLimit(response)
@@ -134,7 +140,7 @@ struct StravaAPI: Sendable {
             logger.notice("strava \(request.name, privacy: .public): 401 after a refresh")
             throw StravaError.unauthorized
         case 429:
-            let until = rateLimit?.resetDate(after: now()) ?? StravaRateLimit.nextQuarterHour(after: now())
+            let until = rateLimit?.resetDate(after: now(), isUpload: request.isUpload) ?? StravaRateLimit.nextQuarterHour(after: now())
             logger.notice("strava \(request.name, privacy: .public): rate limited until \(until, privacy: .public)")
             throw StravaError.rateLimited(until: until)
         case 200..<300:
