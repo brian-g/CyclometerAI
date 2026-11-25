@@ -1,7 +1,7 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-25 (Strava API terms, PRD §8.12 v0.6.28) — §3.8.1: Strava data is a cache of at most seven days, so a Route with a `stravaRouteID` is a cached Strava route, not an import. Its id is derived from the Strava id, `stravaSegmentsFetchedAt` is its fetch time, and it is deleted seven days after that fetch or on disconnect. Ride efforts follow the same cache. §10's cache test and OQDM11 (a Strava route's name on a ride) follow. No schema change.  
+**Updated:** 2026-11-25 (Strava API terms, PRD §8.12 v0.6.28) — §3.8.1: Strava data is a cache of at most seven days, so a Route with a `stravaRouteID` is a cached Strava route, not an import. Its id is derived from the Strava id, `stravaSegmentsFetchedAt` is its fetch time, and it is deleted seven days after that fetch or on disconnect. Ride efforts follow the same cache. §10's cache test and OQDM11 (a Strava route's name on a ride) follow. S20's Strava segments are dropped (#637), so `Route.stravaSegmentsData` and `StravaRouteSegment` go unused; the column stays, since removing it would need a schema stage. No schema change.  
 **Previously:** 2026-11-24 (#628) — Schema 1.3 built: the Strava cache columns on `Ride` and `Route`, `SyncStatus.processing`, and `ConnectedService`, `connectedServices` and `syncDestinationDefaults` in the AppPreferences document. `SyncDestination` is stored by name, so the defaults are a JSON object and an unknown destination is dropped alone. §1, §3.1, §3.7, §3.8, §9 and OQDM7 updated.  
 **Previously:** 2026-11-21 (Strava, PRD §8.12) — §3.8 ConnectedService becomes a `Codable` value in the AppPreferences document, with Keychain `OAuthTokens`, granted scopes and S10's remembered sync defaults. New §3.8.1: segment efforts cached on `Ride`, Strava route id and segments on `Route`. §9 adds schema 1.3.  
 **Previously:** 2026-11-20 (#606) — §3.1: `isHealthWorkoutOwed` is not set for a launch close-out with no ride-end marker. Its end is the relaunch, so it is finalized never owed a workout, in the same write. Documentation only; no schema change.
@@ -854,10 +854,10 @@ struct ConnectedService: Codable, Equatable, Sendable, Identifiable {
     var serviceType: ExternalService
     var keychainIdentifier: String               // kSecAttrAccount of the token item
     var athleteID: String                        // Strava athlete id; the routes endpoint needs it
-    var accountDisplayName: String?              // athlete's name, shown in S12 / S12.1 / S10
+    var accountDisplayName: String?              // not written: S12.1 fetches the athlete's name each time it appears (PRD §8.12)
     var grantedScopes: Set<String>               // from the OAuth callback; gates features (PRD §8.12)
     var connectedAt: Date
-    var isDisconnected: Bool = false             // the service refused a refresh; S12.1 offers Reconnect
+    var isDisconnected: Bool = false             // the service refused a refresh; S12.1 shows Not connected
 }
 
 /// Extensible without schema migration — new cases store cleanly as new string values.
@@ -905,8 +905,8 @@ the migration is lightweight.
 
 // Route (§3.10) gains:
 //     var stravaRouteID: String?              // non-nil = a cached Strava route (below), not a library route
-//     var stravaSegmentsData: Data?           // [StravaRouteSegment]
-//     var stravaSegmentsFetchedAt: Date?      // a Strava route's fetch time: line, analysis and segments together
+//     var stravaSegmentsData: Data?           // [StravaRouteSegment]; unused, stays nil: S20 segments dropped (#637)
+//     var stravaSegmentsFetchedAt: Date?      // a Strava route's fetch time (the name predates #637)
 
 struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var effortID: String
@@ -916,9 +916,9 @@ struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var averageGradePercent: Double
     var elapsedSeconds: Int
     var startIndex: Int                         // orders the list by the ride
-    var climbCategory: Int                      // S20 lists ride-derived segments too
-    var startLatitude: Double                   // segment's start and end: S20 keeps a segment
-    var startLongitude: Double                  // only when both lie within 30 m of the route
+    var climbCategory: Int                      // climbCategory and the endpoints were for S20's matching,
+    var startLatitude: Double                   // dropped with S20 segments (#637); kept as built in #627
+    var startLongitude: Double
     var endLatitude: Double
     var endLongitude: Double
     var prRank: Int?                            // 1–3
@@ -928,13 +928,13 @@ struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var bestDate: Date?
 }
 
-struct StravaRouteSegment: Codable, Equatable, Sendable {
+struct StravaRouteSegment: Codable, Equatable, Sendable {  // unused since S20 segments were dropped (#637)
     var segmentID: String
     var name: String
     var distanceMeters: Double
     var averageGradePercent: Double
     var climbCategory: Int                      // 0 = uncategorized … 5 = HC
-    var bestElapsedSeconds: Int?                // not in Strava's route answer (#627); #633/#635 decide
+    var bestElapsedSeconds: Int?                // not in Strava's route answer (#627); unused, #635 closed
     var bestDate: Date?
 }
 ```
@@ -945,11 +945,13 @@ so the map, S20, S05.2 and navigation read it like any other. What sets it apart
 - `id` is a version 5 (name-based) UUID of `strava-route:<stravaRouteID>` in a fixed app namespace. Every fetch of the
   same Strava route gets the same id, so `Ride.routeId` on rides that followed it relinks after it expired or after a
   reconnect, with no Strava id stored on the ride
-- A fetch writes the whole row at once: the GPX parse and `terrainData` from `GET /routes/:id/export_gpx`,
-  `stravaSegmentsData` from `GET /routes/:id`, and `stravaSegmentsFetchedAt`. A refetch replaces them in place
+- A fetch writes the whole row at once: the GPX parse and `terrainData` from `GET /routes/:id/export_gpx`, and
+  `stravaSegmentsFetchedAt`. A refetch replaces them in place
 - Seven days after `stravaSegmentsFetchedAt`, the row is deleted like a rider-deleted route
-- `surfaceData` stays nil (no Overpass lookup) and no narrative is written. S19's library query and `RouteEntity`
-  (Spotlight) filter on `stravaRouteID == nil`; S19's Strava section and S05.2 read the Strava rows
+- `surfaceData` stays nil (no Overpass lookup) and no narrative is written. S19's library query, `RouteEntity`
+  (Spotlight) and the surface and narrative backfills filter on `stravaRouteID == nil`: those backfills pick every
+  route with a nil surface or narrative, which a Strava route always has (PRD §12). The Strava tabs on S19 and S05.2
+  read the Strava rows
 
 A route the rider exported from Strava and opened as a file is a library route with a nil `stravaRouteID`.
 

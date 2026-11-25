@@ -2,6 +2,7 @@
 **Version:** 0.8.2  
 **Date:** 2026-11-23
 
+**Updated:** 2026-11-25 — Strava screens checked against Design.sketch (#637). §S05.2 and §S19: routes in source tabs, **Local** then one per connected service; a Strava route is a cache, chosen or opened, never imported (PRD §8.12). §S15: the Strava Segments row opens the new §S15.1 sheet of efforts, and Synced To is one capsule per destination, replacing the row-per-destination Sync section. §S20: Strava segments dropped from Phase 2. §S12.1: drawn, and Disconnect also removes Strava routes.
 **Updated:** 2026-11-23 — §S10 includes the services to sync section.
 **Updated:** 2026-11-22 — §S20 mirrors §S15 (#570): a half-screen map header that fades and stretches with the scroll, the route's name and distance over the fade, the name moving into the toolbar; tapping the map opens a sheet with S15's Map Options (Standard or Satellite, the forecast wind layer, Plain or Grade coloring). Elevation becomes heroes (Ascent, Descent, Steepest; Max Grade leaves the Summary). Weather adds the temperature and humidity ranges and the wind shares for a ride starting now. §W10's wind map keeps 220 pt.  
 **Updated:** 2026-11-22 — §S10 is simpler (#645): its Elevation Profile and Heart Rate Zones are gone, and its Ride Stats become §S15's Summary, led by Distance and Time, with Route its own section. S10 now shows the ride's calories there. Its Name row is now **Title**, and a **Notes** field follows it, both laid out as §S15's Edit sheet.  
@@ -395,7 +396,7 @@ the screen differs only in its title, the **Next** button, and the helper text, 
   - Bike picker (Phase 2) — selecting a bike selects its sensors, so the sensor list below follows this control, and the wheel circumference follows from whichever speed sensor that bike carries. See DataModel.md §3.9
 
 - Group: Weather (#149), between Ride Setup and Sensors
-  - Where: at the chosen route's start (its first point, as §S20), wherever the rider is now (#559); with no route, at the rider's position. Choosing a different route on S05.2 fetches it again, showing the loading state until it lands; re-choosing the same route keeps what is shown. A route whose start can't be read reads "Weather unavailable", never the rider's weather in its place
+  - Where: at the chosen route's start (its first point, as §S20), wherever the rider is now (#559); with no route, at the rider's position. Choosing a different route on S05.2 fetches it again, showing the loading state until it lands; re-choosing the same route keeps what is shown. A route whose start can't be read reads "Weather unavailable", never the rider's weather in its place. The exception is a Strava route (Phase 2): none of its points are sent to WeatherKit (PRD §8.12, OQ-S4), so its weather is at the rider's position, as with no route
   - Current conditions: the sky's symbol and name, the temperature trailing as a small `HeroNumber`, and under them the wind as an arrow pointing downwind, the compass point it blows from, and its speed in the rider's units ("→ W 14 km/h"), or "Calm" with no arrow when the speed rounds to 0
   - Hourly strip: one column per hour (time, or "Now" for the hour under way; sky; whole-degree temperature with no unit; chance of rain, which VoiceOver reads as "… chance of rain"), spread across the row's full width, or scrolling sideways when there are more than fit
   - The strip covers the hours the ride will take. With a route chosen, that is the route's distance at the median speed of the rider's earlier rides of it that covered at least 25% of the route, or failing those, the overall speed of their last 10 rides, read only when needed (`RideDurationEstimate`). With no route, or nothing to estimate from, it covers 3 hours, and never more than 12. Choosing a route on S05.2 re-estimates
@@ -461,7 +462,8 @@ pair *from*.
 - Saved routes, one row each as on S19 (name, terrain line, distance); a checkmark marks the chosen route
 - Choosing pops back to S05.1, whose Route row shows the route's name, or "None"
 - Empty library: "No Routes", pointing to the Routes tab — the picker does not import files; that is S19's
-- **From Strava** (Phase 2, PRD §8.12), last, only with Strava connected: pushes S19's Strava route browser. Choosing a route there imports it (or updates it, if already imported), pops back to S05.1 and selects it. The one import the picker makes, so a rider can start on a route planned in Strava without visiting the Routes tab
+- **Source tabs** (Phase 2, PRD §8.12), as Design.sketch — S05.2 draws them: a segmented control under the title, **Local** (the saved routes above) and then one tab per connected service (**Strava**; **Ride with GPS** once it ships). With no service connected there are no tabs, only the saved routes
+- **Strava tab:** the rider's Strava ride routes, rows as on S19's Strava tab. Choosing one pops back to S05.1 and selects it; one not yet cached is fetched first. The picker imports nothing: Strava routes are a cache that follows Strava (PRD §8.12), and a cached one can be chosen offline
 - A failed read says so ("Couldn't Load Routes") rather than showing an empty library
 
 ### Open UX Questions
@@ -812,11 +814,13 @@ As built (#534): **Speed Gauge** in S08's Ride section, after Speed; W1 itself i
   - **Free ride:** W10's own reading, drawn as an even field (four columns, rows to the map's shape) over whatever the map shows, about 5 km across at first. No extra WeatherKit requests: its wind barely changes across a few kilometres
   - **Following a route:** the route, framed whole with the rider on it, and the forecast wind along it from the rider to the finish, one sample per 10 km of what is left, 2 to 8 of them. Each is the forecast for the hour the rider is expected there: the rest of the route at this ride's average moving speed once it has gone 5 km, and before that in S05.1's estimate for the route. W10's reading is the sample where the rider is, so a route costs one request fewer than it has samples. Sampled when the sheet opens, and not again within 10 minutes; a failed point is left out
   - Rendered in the shared `WindLayer`, which §S20 draws too
+  - **On a Strava route** (Phase 2): drawn as on a free ride, since none of its points are sent to WeatherKit (PRD §8.12, OQ-S4)
 - **Rain along the route (#152):** with a route loaded, each forecast W10 fetches also checks the route ahead. The points are sampled as the wind map samples them (one per 10 km, 2 to 8), but only over the stretch the rider reaches within two hours, timed the same way. A point counts as wet when the hour the rider gets there has a 50% or higher chance of precipitation, read from the hourly forecast. The rider's own position counts, for the hour under way. The first wet place shows in the dashboard's top banner, not on the card: "Rain 70% · 18.4 km ahead", or "Rain 70% · here", named and drawn as the rain state above (Snow, Thunderstorms). The distance reads as W9's does
   - Silent: no tone or haptic, and nothing in the radar alert path (#135). It shows dimmed and never wakes the screen. It lasts four seconds, the same as the other transient banners. It ranks below a speed-source switch and a calibration and above off-route
   - It shows again on every check while rain is still ahead, about every 10 minutes. A free ride has no checks. A failed point is left out; with every point failing, only the rider's own position is checked
   - No checks while no one can see the dashboard (paused, locked, minimised to the pill, or in the background), and none while off route: distances along a route the rider has left would mislead, and "Off route" matters more then
   - Points less than 1 km ahead count as the rider's own position and aren't asked about, so the banner reads "here" or at least "1.0 km ahead"
+  - No checks on a Strava route (Phase 2): none of its points are sent to WeatherKit (PRD §8.12, OQ-S4)
 
 ---
 
@@ -1191,11 +1195,11 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 
 - One toggle capsule per connected service (Apple Health first) and **Apple Health**: the destination's mark, and its name. A service whose account is disconnected shows a "􁅥" opening its S12.1. With no service connected the section is Apple Health alone.
 - Each toggle defaults to the rider's last choice for that destination, remembered in AppPreferences; Apple Health defaults on
-- Each capsule's background color when selected aligns with the services tuypical branding. Apple Health: #FF0011, Strava: #FC5200, Ride with  GPS: #FA6400, Trailforks: #29691f, Tribos Studio: #581BFF. Text should contrast sufficiently. 
+- A selected capsule is `primaryDark` for every destination, with `textOnPrimary` for its symbol and name (Brian, #637). Not each service's brand color: Strava's brand guidelines keep Strava orange to Strava's own marks (PRD §8.12)
 - Each capsule should use a symbol before the name of the service. Apple Health: figure.run, Strava: cyclometer.brands.strava-icon, Ride with GPS: cyclometer.brands.ride-with-gps-icon, Trailforks: tbd, Tribos studio: tbd
 - **Strava** uploads when S10 closes, by Finish Ride or a swipe, so the name and description edited above go with it. The upload runs in the app, not the sheet: closing S10 never cancels it
 - **Apple Health** is written when S10 closes, with the services, and only when its row is on (below). Not automatic: once a ride can also go to Strava, an automatic Health write duplicates it — Strava's app imports Health workouts, so the ride could land on Strava twice, and Strava's own workout could come back into Fitness beside this one. Health is a destination the rider picks, like any service
-- Progress and failures are on the ride's S15 Sync section and S14's Sync swipe, not here: S10 is gone by the time an upload finishes
+- Progress and failures are on the ride's S15 Synced To row and S14's Sync swipe, not here: S10 is gone by the time an upload finishes
 - **Locked** (assets/Monetization.md §4, §5): with the trial over and no Lifetime Unlock, Apple Health and every service row show a lock icon in place of the toggle, and nothing is written or uploaded. Tapping a locked row opens the paywall with that row's headline ("Save rides to Apple Health", "Send rides to Strava and more"). The rows read `EntitlementsClient`, never dates or StoreKit
 
 The sheet specified before this revision, kept for its row details:
@@ -1408,17 +1412,19 @@ the service's side) stays listed, its row reading "Reconnect".
 
 ### S12.1 — Strava Account
 
-**Phase:** Phase 2 · **Sketch:** not drawn yet
+**Phase:** Phase 2 · **Sketch:** 12.1 - Strava: not connected, 12.1 - Strava: connected
 
-- Not connected: Strava's "Connect with Strava" button (Strava's own asset, unaltered) and one line on what connecting
-  allows: upload rides, see segments, import routes
-- Connected: the athlete's name and profile photo from Strava, "Connected since" date, and a **Permissions** section
+- Not connected: Strava's "Connect with Strava" button (Strava's own asset, unaltered), alone. No explanation and no
+  footer: the button already says what it is and whose it is
+- Disconnected by Strava (access revoked on strava.com): the same as Not connected
+- Connected: the athlete's name and profile photo, fetched from Strava each time S12.1 appears and never stored (PRD
+  §8.12). Until they arrive, or offline, the card shows the photo's placeholder and "Strava". Then the
+  "Connected since" date, and a **Permissions** section
   naming anything the rider unticked on Strava's consent screen with what it turns off ("Uploads need Upload
   activities"), with Reconnect to grant it
 - **Disconnect** (destructive), confirmed by an alert: "Disconnect Strava?", "Rides already uploaded stay on Strava.
-  Segments shown in Cyclometer are removed." Disconnect revokes access and pops to S12
-- Disconnected by Strava: "Strava access was removed" and Reconnect
-- Footer: "Powered by Strava" mark
+  Segments and Strava routes shown in Cyclometer are removed." Disconnect revokes access and pops to S12
+- Connected footer: "Powered by Strava" mark
 
 ### Open UX Questions
 - [x] Silent Mode override toggle: not a setting at this time.
@@ -1543,10 +1549,9 @@ Sections appear on screen in the order listed below.
   - **As built (#548):** one Elevation section: the chart, then Highest and Lowest, Ascent and Descent, and Steepest, in a grid two columns wide that drops to one when the readings don't fit side by side. The Elevation sheet keeps its three sections.
   - **As built (#536):** each section is its dashboard sheet's own (W1/W3/W11 Ride metrics, W23 Calories, W5 Cadence, W4/W12 Heart Rate, W14–W18 Elevation), built from the saved ride: the track for the charts, the `Ride` row for everything the dashboard stored at the finish. Charts cover the whole ride. The current readings are left out (Speed, Pace, Heart Rate and Zone, Elevation, Grade), and so are the Elevation sheet's Route part and the Ride metrics sheet's Distance row. Average, Max, Highest, Lowest and Steepest stay. The sheets' untitled first sections take the section's name, and their zone sections are titled Cadence Zones and Heart Rate Zones. Hidden: Speed and Pace with no moving second, Active Calories with no stored series, Cadence with no cadence sensor, Heart Rate with no heart rate, and Elevation with no altitude. HR and cadence zone time is sorted against the rider's zones as they are now (S12 and Health), as the sheets sort it, so a later zone change re-sorts an old ride. Active Calories draws the series stored at the finish, ending on the Summary's total, so a later change of Health body weight moves neither. A ride finished before #536 but after #460 has no series, so it has no Active Calories section.
 - Route section: the route the ride followed, a link to its S20. A route deleted since shows its name with no link; a free ride has no section (#426)
-- **Strava Segments** (Phase 2, PRD §8.12), for a ride synced to Strava, after Sync: a label showing the number of segments as "(number) segments" and in the trailing area, the number of Strava awards for the segment using the SF symbol 'medal' up to 5 (with ... for more than 5). There is a trailing chevron indicating that when tapped more information will be revealed. In this case, opening Strava or the Strava web application to the segment details. 
-- **Sync** (Phase 2, PRD §8.12), for a ride with any sync record or Health workout: one row per destination, Apple Health included ("Saved to Apple Health", or **Add to Apple Health** for a ride not sent there) — "Uploaded" with **View on Strava** (opens the activity in the Strava app, else Safari), "Uploading…", "Processing on Strava", or the failure and **Retry**. A ride never sent shows an **Upload to Strava** row when Strava is connected
 - **Vehicle pass summary:** Show count of vehicle passes, with the ability to navigate to show the details of each pass. The time of the pass, the speed of the vehicle at time of pass. Shown as a sheet. No tap on a pass. This section is hidden with no radar. 
-- **Sync** (Phase 2, PRD §8.12), for a ride with any sync record or Health workout: one capsule destination: Apple Health, Strava, Ride with GPS (tbd). The capsule will show the same states as the capsules in S10 - Ride Summary Sync Options. When tapped, the capsules will navigate to the Apple Health Fitness record, or to the ride on Strava (app first, then web if app not found). If a service was not synced to, the capsule shows in grey and when tapped will ask the user to sync to the service. 
+- **Strava Segments** (Phase 2, PRD §8.12), for a ride synced to Strava: the first row of the card that ends with Synced To, as Design.sketch — S15 - Ride Detail (Alternative) draws it. "Strava Segments", with the ride's awards under it: one SF Symbol `medal` per effort with a PR medal (Strava's 1st–3rd best), up to 5, then "…". The number of segments and a chevron trail. Opens S15.1. While Strava hasn't processed the ride, "Segments appear once Strava has processed the ride" replaces the count; the row is hidden when the activity has no segments. No "Powered by Strava" mark on the row (Brian, #637): S15.1 carries it, and Strava's app review (#288) decides whether the row needs one too
+- **Synced To** (Phase 2, PRD §8.12), for a ride with any sync record or Health workout, and for a ride never sent anywhere while Strava is connected (every capsule grey): the last row of the Strava Segments card, one capsule per destination (Apple Health, Strava, Ride with GPS once it ships), styled as S10's Sync To capsules. A sent ride's capsule is `primaryDark`, as a selected one on S10, and tapping it opens the Apple Health Fitness record, or the ride on Strava (the Strava app first, else the web). A destination the ride wasn't sent to is grey, and tapping it asks whether to send it (**Add to Apple Health**, **Upload to Strava** when Strava is connected). An upload in progress reads "Uploading…" or "Processing on Strava", and a failed one shows the failure and offers **Retry**
 - **As built (#538):**
   - **Page:** the inset-grouped list stays, rather than Sketch's plain page, so the #536 sections keep their cards. The map draws behind the list, under the top safe area.
   - **Map header:** half the screen's height. Its bottom 80 pt (`Spacing.mapHeaderFade`) fades to the page, and the title block starts where the fade does.
@@ -1567,7 +1572,26 @@ Sections appear on screen in the order listed below.
     - **Saving an edit:** the change shows at once, and S14 reloads. Every S15 reads the stored title with its stats each time it appears, and S20 rereads its Previous Rides. So other copies of the ride, further up the stack or on the other tab, show the new title when they come back. The GPX is rewritten only when the title changed (#286). If a write fails, the screen reads the stored values back.
     - **Make Route:** not built, as its behaviour is still TBD.
   - **Summary:** hero numbers in a card. Each is absent with no data, and Average Speed is absent with no moving second.
-  - **Vehicle Passes:** the last row of the Summary card, under the hero numbers (#549). Absent with no radar paired; the card shows for the count alone when there are no hero numbers. The count row is disabled while the passes are still loading or none were stored.
+  - **Vehicle Passes:** the last row of the Summary card, under the hero numbers (#549). Absent with no radar paired; the card shows for the count alone when there are no hero numbers. The count row has a trailing disclosure chevron, as it opens the passes sheet (#660), and is disabled while the passes are still loading or none were stored.
+
+---
+
+## S15.1 — Strava Segments
+
+**Phase:** Phase 2 · **Sketch:** S15.1 - Strava Segment Sheet  
+**Purpose:** The ride's Strava segment efforts, opened from S15's Strava Segments row (PRD §8.12).
+
+### Key Components
+
+- A sheet, closed with the standard close button (§Sheet standards)
+- One row per segment effort, in ride order: the segment's name; trailing, a medal for a PR medal (gold, silver or bronze for Strava's 1st–3rd best), then the effort's elapsed time and a chevron. A row opens the segment on Strava (the Strava app first, else the web)
+- Pull to refresh fetches the efforts again
+- Footer: Strava's "Powered by Strava" mark
+
+### Open UX Questions
+
+- [ ] Strava also gives each effort's distance, average grade and KOM/QOM rank (top 10). The frame's rows don't show them: should they?
+- [ ] Best time and its date aren't in Strava's activity answer (#627); #633 decides whether to show them
 
 ---
 
@@ -1617,12 +1641,13 @@ Sections appear on screen in the order listed below.
 - Swipe a route row left to right → "Use Route" (`play.fill`, a full swipe allowed): opens the Start Sheet with that route in S05.1's Route row, as S20's toolbar button does. Absent while a ride is recording.
 - Empty state: `ContentUnavailableView` with "No Routes" label and import action
 - Route import action — Opens the Files browser sheet that browses the File system of the iPhone and iCloud.
-- **Strava route browser** (Phase 2): the rider's Strava ride routes, newest first, 30 at a time — name, distance, elevation gain, a map thumbnail from Strava's summary polyline. A route already imported carries a checkmark; choosing it updates the imported copy in place. Choosing imports through the GPX importer and pushes its S20. Private routes need the `read_all` scope; without it, a footer says so. "No Routes on Strava" when empty
+- **Source tabs** (Phase 2, PRD §8.12), as Design.sketch — S19 draws them: a segmented control under the title, **Local** (the saved routes, everything above) and then one tab per connected service (**Strava**). With no service connected there are no tabs
+- **Strava tab** (Phase 2): the rider's Strava ride routes, newest first, 30 at a time — name, distance, elevation gain, a map thumbnail from Strava's summary polyline. Tapping one pushes its S20, fetching it first when it isn't cached. Nothing is imported: Strava routes are a cache that follows Strava (PRD §8.12), so one deleted on Strava disappears here. To keep one, the rider exports its GPX from Strava and imports the file. Private routes need the `read_all` scope; without it, a footer says so. "No Routes on Strava" when empty
 - Route filter action — Opens a sheet that contains basic filter options: distance slider (min, max), elevation gain slider (max). 
 
 ### Open UX Questions
-- [x] How does the user import a route here (vs. at ride start)? There will be a route import action. In MVP it opens the Files browser; connected-service imports (Strava and the rest) arrive with Accounts in Phase 2.
-- [x] Should routes from tribos.studio be shown in a separate section or merged with local routes? Merged — decided ahead of the work; the service integrations themselves are Phase 2
+- [x] How does the user import a route here (vs. at ride start)? There will be a route import action. In MVP it opens the Files browser. In Phase 2, Strava routes are browsed in their own tab, not imported (PRD §8.12).
+- [x] Should routes from tribos.studio be shown in a separate section or merged with local routes? Merged — decided ahead of the work. Superseded 2026-11-25 (#637): each connected service gets its own source tab, as Strava does
 - [ ] In the future, Phase 4, there will be a route suggestion tool.
 
 ---
@@ -1630,7 +1655,7 @@ Sections appear on screen in the order listed below.
 ## S20 — Route Detail
 
 **Phase:** MVP  
-**Purpose:** Full detail view of a route with map, elevation, weather, Strava segments, and previous rides.
+**Purpose:** Full detail view of a route with map, elevation, weather, and previous rides.
 
 ### Layout
 > *Refer to RouteDetailView` — Protyped In source code.*
@@ -1648,11 +1673,12 @@ Sections appear on screen in the order listed below.
   - The strip reads against the clock, once a minute: "Now" labels the column whose hour contains the current time, and past hours drop off while S20 stays up. The current conditions are not refetched until S20 appears again
   - The route's start is a fixed coordinate, so location permission plays no part. Centred, in `textSecondary`: "Offline: Weather unavailable" when WeatherKit fails with no usable network (airplane mode, no Wi-Fi or cellular); "Weather unavailable" for any other failure, or a route with no geometry. A spinner while it loads
   - Replaces the prototype's `WindDirectionView`; the compass label carries no degrees, as on S05.1 and W10
+  - A Strava route (Phase 2) shows no weather and no forecast wind: none of its points are sent to WeatherKit (PRD §8.12, OQ-S4)
 - **Previous rides**: date, elapsed time, conditions. Each row opens that ride's S15 (#426)
   - Conditions (#204) are the date's second line in `textSecondary`: the sky recorded most often during the ride (the earliest on a tie) and its temperature range, "Partly Cloudy · 14–18 °C", as S15 quotes it. Words rather than a symbol, since the recorded conditions don't say whether the sun was up. A ride with none recorded (before #151, or every request failed) shows the date alone
 - "Use Route" in the toolbar — sets active route in Start Sheet and navigates to S05.1. Absent while a ride is recording, as on S19
-- **As built (#570):** laid out as §S15 (#538), after Apple Fitness's workout detail. The map, the Summary, Weather, Strava Segments and Previous Rides above are unchanged except as listed here.
-  - **Page:** the inset-grouped list, drawn over the map, which runs under the top safe area. Sections in this order: Summary, Elevation, Weather, Strava Segments, Previous Rides.
+- **As built (#570):** laid out as §S15 (#538), after Apple Fitness's workout detail. The map, the Summary, Weather and Previous Rides above are unchanged except as listed here.
+  - **Page:** the inset-grouped list, drawn over the map, which runs under the top safe area. Sections in this order: Summary, Elevation, Weather, Previous Rides. Strava segments on S20 were dropped from Phase 2 (#637).
   - **Map header:** S15's, shared (`MapHeaderChrome`): half the screen's height, its bottom 80 pt (`Spacing.mapHeaderFade`) fading to the page. It fades linearly as the list scrolls, until the title reaches the top, and grows from its top edge when pulled down.
     - **Content:** the route, its start and finish flags and its direction-of-travel arrows (#341). No wind: that is the sheet's layer. No panning or zooming.
     - **Framing:** tight on the route, as S15's header frames a ride (each side floored at 200 m, margins in points), between the toolbar and the fade.

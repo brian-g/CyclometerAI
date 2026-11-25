@@ -1062,3 +1062,18 @@ the same day. I passed it on as current without checking it.
 **Rule.** A memory that describes the environment (a block, an outage, a flaky host) is a snapshot. Before building
 instructions on it, check it with one request. If I can't check, say how old the note is rather than presenting it as
 current.
+
+---
+
+## The PRD states requirements, never UX (2026-11-25, #636, #637)
+
+**What happened.** Revising PRD §8.12 for Strava's API terms, I wrote how the screens present Strava routes: "a
+Strava section" on S19, and S05.2 listing them "alongside library routes, marked as Strava's, so the choice at ride
+start is one list". Brian's Sketch frames draw tabs instead. Brian: "The PRD should not indicate any specific UX".
+
+**Why I was wrong.** Layout is UX.md's and Design.sketch's. A layout line in the PRD duplicates them, goes stale the
+moment the design moves, and here contradicted the design before it was finished.
+
+**Rule.** In the PRD, write what the product must do and why (which screens have it, what the rider must be able to
+tell, what data and rules apply), and point to UX.md for how it looks. No sections, tabs, lists, rows, placement or
+markings in the PRD. Layout goes in UX.md, following Design.sketch.

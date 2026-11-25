@@ -53,6 +53,8 @@
 | 0.6.26 | 2026-11-23 | Brian / Claude | Strava token service (#625). §12 Privacy records what the service sees: the code and tokens in transit to Strava, stored and logged nowhere. §8.12 corrects what the webhook does: the stateless service only acknowledges a deauthorization, and the app learns of it from a refused refresh. The service runs as Cloudflare Pages Functions in the acmeapps.xyz repo. |
 | 0.6.27 | 2026-11-24 | Brian / Claude | Strava client (#627). §8.12 Limits and terms: a 429 waits until midnight UTC when a daily limit is spent, not just for the next quarter hour, since retrying every 15 minutes all day would only add refused requests that still count. §8.12 segments: Strava's activity and route answers carry no best time, even for a subscriber (checked against Strava), so S15's best time is #633's decision and S20's is the rider's fastest effort among the route's rides. |
 | 0.6.28 | 2026-11-25 | Brian / Claude | Strava API terms (Agreement and Policy, effective 2026-06-01). Strava data may only be cached, for at most seven days, so Strava routes are browsed, not imported. §8.12 gains Strava data on the device: refetched when shown after a day, deleted seven days after its fetch, and deleted at once on disconnect or a refused refresh; never indexed, sent to a third party or given to a model. S19 lists Strava routes apart from the library; S05.2 lists both. A rider keeps a Strava route by exporting its GPX from Strava. S15's efforts follow the same cache. OQ-S2 (no) and OQ-S3 (yes) resolved; OQ-S4 (WeatherKit), OQ-S5 (combining data) and OQ-S6 (a Strava route's name on a ride) added. §8.6's service rows, §8.11 (no Strava routes in Spotlight) and §12 Privacy (Overpass, WeatherKit, Spotlight) follow. |
+| 0.6.29 | 2026-11-25 | Brian / Claude | §8.12 Routes states requirements only: Strava routes on S19 and S05.2, distinguishable from the rider's own, chosen at ride start like any route. How the screens present them is UX.md's, not this document's (Design.sketch draws them in tabs by source, #637). This replaces 0.6.28's S19 section and single S05.2 list. S15's segment fields and its branding line become requirements too, and the layout goes to UX.md (§S15, new §S15.1). S20's Strava segments are dropped from Phase 2 (#637, #635 closed): §6, §7's S20 row, §13, and §8.12's priorities, S20 section, route fetch (`export_gpx` only), OQ-S5 and acceptance follow. The athlete's name and photo are fetched when S12.1 appears, never stored. A refused refresh no longer names S12.1's presentation. |
+| 0.6.30 | 2026-11-25 | Brian / Claude | Live segments during a ride: Strava's partner devices and apps have them (Strava Live Segments, licensed, for subscribers); Cyclometer doesn't and can't, since building them from Strava's segment data would replicate Strava functionality (API Agreement; Policy §5.2). Recorded in §8.12 and §15. "Segment detection" leaves Phase 3 (§6, §13): with no Strava segments to detect, nothing is left of it. |
 
 ---
 
@@ -203,7 +205,6 @@ Controls must be large enough to tap without looking. The active ride screen mus
 
 ### Phase 2
 - Route service integrations (tribos.studio, Strava, Ride with GPS) — ship with the Settings → Accounts section that authenticates them (§8.6). Strava comes first (§8.12)
-- S20's Strava segments (§8.12) — the rest of the Routes tab is MVP, and its weather shipped in M10.6
 - Ride history (S14) with map replay and vehicle pass event visualization
 - Ride detail view (S15): HR graph, cadence graph, radar event + vehicle pass timeline
 - Heart rate zone training graphs
@@ -216,7 +217,6 @@ Controls must be large enough to tap without looking. The active ride screen mus
 ### Phase 3
 - Power meter BLE support (ANT+ bridge via Garmin SDK if viable; BLE power meters natively)
 - ENGO 2 / ActiveLook AR glasses integration (S18)
-- Segment detection
 
 ### Resolved Decisions (cumulative)
 - **Persistence:** SwiftData (iOS 27+ minimum target; raised from iOS 26 on 2026-09-15 for HealthKit's cycling-specific HR, cadence and power zone tracking)
@@ -262,7 +262,7 @@ Controls must be large enough to tap without looking. The active ride screen mus
 | S17 | Apple Watch | Phase 2 | Glanceable watch app. |
 | S18 | AR HUD Configuration | Phase 3 | Configure ENGO 2 / ActiveLook display layout |
 | S19 | Route Management | MVP | Browsable list of saved routes with list and map views |
-| S20 | Route Detail | MVP | Route detail laid out as S15 (#570): map header and full-screen map sheet, elevation profile, distance, current weather at the route's start, previous ride history. Strava segments are Phase 2 |
+| S20 | Route Detail | MVP | Route detail laid out as S15 (#570): map header and full-screen map sheet, elevation profile, distance, current weather at the route's start, previous ride history |
 
 > **Note:** Screen-level UX detail — layout, component hierarchy, interaction patterns, and annotation — is specified in `UX.md`. The PRD defines *what* each screen must accomplish; UX.md defines *how* it is structured.
 
@@ -1030,14 +1030,19 @@ Strava is the first connected service. It ships with the Settings → Accounts s
 1. Connect a Strava account and keep the connection (S12 Accounts, S12.1): #625 token service, #626 sign-in, #627 client, #628 schema, #629 screens
 2. Upload a ride to Strava, chosen per ride in S10's Sync To section: #630 queue, #631 Sync To, #632 S15 Sync and S14 retry
 3. The ride's segment results on Ride Detail (S15): #633
-4. A route's segments on Route Detail (S20): #635
-5. Strava routes at ride start: browsed on S19 (#634), and chosen on S05.2 (#636), held as a cache, never imported
-6. Later, with Multi-bike (§6, DataModel.md §3.9): the ride's Strava gear (#638)
+4. Strava routes at ride start: browsed on S19 (#634), and chosen on S05.2 (#636), held as a cache, never imported
+5. Later, with Multi-bike (§6, DataModel.md §3.9): the ride's Strava gear (#638)
 
 Design.sketch frames for all of it: #637.
 
-Not in scope: Strava Live Segments (a licensed partner API that needs a Strava subscription), reading the rider's
-Strava activity history into Cyclometer, and on-device segment detection (Phase 3).
+Not in scope: reading the rider's Strava activity history into Cyclometer, and live segments during a ride (below).
+
+> **Live segments: partner apps have them; Cyclometer doesn't and can't.** Strava times segments live during a ride
+> on licensed partner devices and apps (Garmin, Wahoo and others), for riders with a Strava subscription, through
+> Strava Live Segments, a partner API outside the public API. Cyclometer has no such licence. Building the same
+> thing on the phone from Strava's segment data would "compete with or replicate Strava functionality", which the
+> API Agreement forbids (Policy §5.2: no use "competitive to Strava"). So no ride-time segment widget: a ride's
+> segments appear only after Strava has processed the upload (S15). §15 records it.
 
 **Connecting (OAuth 2).**
 
@@ -1062,12 +1067,11 @@ Strava activity history into Cyclometer, and on-device segment detection (Phase 
 - Access tokens last six hours. A request refreshes first when the token has under five minutes left, and refreshes
   once more on a 401. Each refresh can return a new refresh token that replaces the old one at once, so refreshes are
   serialized and the newest token is written before any request uses the new access token
-- A refresh that Strava refuses (the rider revoked access on strava.com) leaves the account **Disconnected**: S12.1
-  says so and offers Reconnect; uploads waiting on Strava stay pending. All Strava data on the device is deleted
+- A refresh that Strava refuses (the rider revoked access on strava.com) leaves the account **Disconnected**, and the
+  rider can connect again (UX.md §S12.1); uploads waiting on Strava stay pending. All Strava data on the device is deleted
   then, as on disconnecting
 - Disconnecting (S12.1) revokes the token through the token service, deletes the Keychain item, the `ConnectedService`
-  record, and all Strava data on the device (below): Strava routes and their analysis, route segments and segment
-  efforts. Rides keep their own data and their `RideSyncRecord`s, so S15 can still link to the activity. A route the
+  record, and all Strava data on the device (below): Strava routes and their analysis, and segment efforts. Rides keep their own data and their `RideSyncRecord`s, so S15 can still link to the activity. A route the
   rider exported from Strava and opened as a file is theirs, and stays (OQ-S3)
 
 **Strava data on the device.** Strava's API Policy (effective 2026-06-01) allows Strava data, meaning anything read
@@ -1075,11 +1079,12 @@ through the API, only in a cache, for at most seven days (§6.2). That includes 
 export. A deletion on Strava must show in the app within 48 hours (§6.3), and revoked access means deletion within
 30 days (§7.4). So nothing read from Strava is library data:
 
-- Every Strava item carries the time it was fetched: a route and its analysis, its segments, a ride's segment efforts.
+- Every Strava item carries the time it was fetched: a route and its analysis, a ride's segment efforts.
   When shown, an item more than a day old is refetched if the device is online, which keeps a deletion on Strava well
   inside 48 hours. Offline, the cached copy is shown until it expires
 - An item seven days past its fetch is deleted, at launch and whenever the app becomes active, and is never shown
 - Disconnecting, or a refused refresh, deletes all of it at once
+- The athlete's name and profile photo are fetched each time the account screen (S12.1) appears, and never stored
 - Strava data is never indexed (Spotlight, §8.11; Policy §5.5), never sent to anyone but Strava (the Overpass surface
   lookup, §12; WeatherKit, OQ-S4; Policy §5.10), and never given to a model (the route narrative, #203; Policy §5.3)
 - What Cyclometer recorded itself is not Strava data. A ride's GPS track, sensor data and statistics stay, and so does
@@ -1099,43 +1104,30 @@ export. A deletion on Strava must show in the app within 48 hours (§6.3), and r
   An upload Strava rejects as a duplicate of an existing activity is recorded as synced, with that activity's id.
   This is also why the Health workout is a Sync To choice rather than automatic (UX.md §S10)
 - Uploads outlive S10: they run in an app-scoped queue, a ride still pending at quit resumes at the next launch, and
-  a failed one is retried from S15's Sync section or S14's Sync swipe. Nothing uploads without the rider's choice
+  a failed one is retried from S15's Synced To row or S14's Sync swipe. Nothing uploads without the rider's choice
 - Not synced back: renaming or deleting a ride in Cyclometer after upload leaves the Strava activity as it is
 
 **Segments on Ride Detail (S15).** For a ride synced to Strava, `GET /api/v3/activities/:id?include_all_efforts=true`
 returns its segment efforts. Strava matches segments after processing, so an empty answer within ten minutes of the
 upload is retried the next time S15 appears. Otherwise the efforts are cached on the ride under the rules above
 (`Ride.stravaSegmentsFetchedAt`): refetched when S15 shows them more than a day after they were fetched, deleted
-seven days after, and refetched at once by pull to refresh. Each effort shows the segment's name, distance and average grade, the effort's elapsed time, a PR
-medal for `pr_rank` 1–3 and a KOM/QOM rank in the top 10 — all free to every Strava account (a first effort on a
-segment gets neither). The rider's best time and its date are not in this answer, even for a subscriber on a ride with
+seven days after, and refetched at once by pull to refresh. S15 gives the rider the ride's efforts and their results:
+the PR medal (`pr_rank` 1–3) and the KOM/QOM rank (top 10), free to every Strava account (a first effort on a segment
+gets neither). How they're presented is UX.md's (§S15, §S15.1). The rider's best time and its date are not in this answer, even for a subscriber on a ride with
 PRs (checked against Strava in #627). Whether S15 shows them, and from which call, is #633's decision.
 
-**Segments on Route Detail (S20).** Two sources, both open to a Standard-tier app:
+> **No segments on Route Detail (S20).** Dropped from Phase 2 (#637; #635 closed). If they return, Explore Segments
+> (`GET /api/v3/segments/explore`) is closed to Standard-tier apps since 2026-09-01, so a route's segments would come
+> from a Strava route's own answer (`GET /api/v3/routes/:id`) and from the efforts of the route's rides synced to
+> Strava.
 
-- **A Strava route:** the segments in `GET /api/v3/routes/:id`, fetched and cached with the route (Routes, below)
-- **Any route, from its previous rides:** the segment efforts of rides that followed the route (`Ride.routeId`) and
-  were synced to Strava — the same efforts S15 caches. A segment belongs to the route when its start and its end each
-  lie within 30 m of the route's polyline, so a detour's segments are left out. Rides whose efforts aren't cached are
-  fetched when S20 appears, the five most recent at most, into the cache S15 reads
-- Merged by segment id and listed once each, in order of distance along the route. Each row: name, distance, average
-  grade and climb category. The best time and its date are the rider's fastest effort among the route's rides. That
-  is the rider's own data, so free accounts get it too. Strava's route answer carries no PR (#627); whether to fetch
-  Strava's PR from another call is #633 and #635's decision
-- A route from Files that has never been ridden, or whose rides were never synced, has no segments section
-
-> **Not used: Explore Segments.** Matching segments to an unridden GPX route needs `GET /api/v3/segments/explore`,
-> which Strava restricted to approved Extended Access Tier apps (generally 10,000+ athletes) on 2026-09-01; it also
-> returns only the top 10 segments per box. If Cyclometer reaches Extended Access, the route's bounding box can be
-> tiled, each tile explored, and the returned polylines matched with the same 30 m rule, within the rate limit.
-
-**Routes.** Strava routes are browsed, not imported. S19 lists the rider's Strava routes
-(`GET /api/v3/athletes/:id/routes`, rides only) apart from the library, in a Strava section laid out in UX.md §S19
-(#637). They're kept apart because they behave differently: they follow Strava, and one deleted there disappears
-here. Opening one fetches it, `GET /api/v3/routes/:id` for its segments and `GET /api/v3/routes/:id/export_gpx` for
-its line, and runs the GPX importer's parsing and analysis (§8.6) into the cache, without the surface lookup or the
-narrative. S05.2 lists Strava routes alongside library routes, marked as Strava's, so the choice at ride start is one
-list. Choosing one that isn't cached fetches it first, and a ride can start on a cached copy offline.
+**Routes.** Strava routes are browsed, not imported. The rider's Strava routes come from
+`GET /api/v3/athletes/:id/routes` (rides only), on the Routes tab (S19) and at ride start (S05.2). The rider must be
+able to tell them from the routes they own, because they behave differently: they follow Strava, and one deleted there
+disappears here. How each screen presents them is UX.md's (§S19, §S05.2). Opening one fetches its line with
+`GET /api/v3/routes/:id/export_gpx` and runs the GPX importer's parsing and analysis (§8.6) into the cache, without the surface lookup or the narrative. A Strava route
+can be chosen at ride start like any other. Choosing one that isn't cached fetches it first, and a ride can start on
+a cached copy offline.
 
 - A Strava route's local id is a name-based UUID derived from its Strava id, so it is the same every time the route
   is fetched. Rides that followed it (`Ride.routeId`) relink when it's fetched again, after it expired or after a
@@ -1157,15 +1149,17 @@ one (`Bike.stravaGearID`). Uploads can't name gear, so once the upload has an `a
   the background
 - New Strava apps are single-player; an upgrade allows 10 athletes, enough for development and a small TestFlight.
   Anything wider waits on Strava's app review (#288)
-- Branding: S12.1 uses Strava's "Connect with Strava" button; Strava's sections on S15 and S20 carry the "Powered by
-  Strava" mark, and their rows link "View on Strava". Strava orange appears only in Strava's own marks
+- Branding, per Strava's brand guidelines: connecting uses Strava's own "Connect with Strava" button, Strava data
+  carries Strava's "Powered by Strava" attribution and links back to Strava, and Strava orange appears only in
+  Strava's own marks. Where the attribution goes is UX.md's; Strava's app review (#288) confirms it
 - Strava data is shown only to the rider it belongs to (Policy §2.3). How it is stored, and what it is never used for,
   is under Strava data on the device, above
 
 **Open questions.**
 
 - OQ-S1: Should S12.1 offer "Upload automatically", making Strava's Sync To default sticky without a choice per ride? No
-- OQ-S2: Is the on-device route narrative allowed for Strava-exported routes? No. Policy §5.3 forbids any use of
+- OQ-S2: Is the on-device route narrative allowed for Strava routes (read through the API, not a GPX file the rider
+  exported from Strava and opened, which is theirs)? No. Policy §5.3 forbids any use of
   Strava data in an AI application, including loading it into a model's context, with no exception for on-device
   models
 - OQ-S3: Must routes imported from Strava be deleted on disconnect or deauthorization? Yes, within 30 days (Policy
@@ -1175,7 +1169,7 @@ one (`Bike.stravaGearID`). Uploads can't name gear, so once the upload has an `a
   review (#288) answers, a Strava route sends none: the Start sheet (S05.1) sends the rider's location, as with no
   route; S20 shows no weather for it; and rain alerts that look ahead along the route are off on it
 - OQ-S5: Does Policy §5.4's ban on combining Strava data "with other customer data" cover the rider's own Cyclometer
-  data? S15 shows efforts beside the ride, and S20's best time draws on the rider's rides. The section is about
+  data? S15 shows efforts beside the ride's own data. The section is about
   aggregate analytics, so the reading here is no; confirm in the app review (#288)
 - OQ-S6: Is a Strava route's name, kept on a ride that followed it (`Ride.routeName` and the default title), Strava
   data? The reading here is no: the title is the rider's, accepted or edited in S10, and the name is part of the ride
@@ -1188,7 +1182,7 @@ one (`Bike.stravaGearID`). Uploads can't name gear, so once the upload has an `a
 - [ ] Unticked scopes hide their features and are named on S12.1
 - [ ] A ride uploads from S10 and links to its Strava activity; a duplicate records the existing activity
 - [ ] A ride pending at quit uploads after relaunch
-- [ ] S15 shows the ride's efforts with PR medals; S20 shows a Strava route's segments, and a GPX route's segments from its synced rides, without a detour's
+- [ ] S15 shows the ride's efforts with their PR medals and KOM/QOM ranks
 - [ ] Strava routes list on S19 and S05.2; one starts a ride online, or offline from its cached copy; its rides relink when it's fetched again
 - [ ] Strava data more than a day old is refetched when shown, and deleted seven days after its fetch; a route deleted on Strava disappears the next time the list is shown
 - [ ] Strava routes are absent from Spotlight, the Overpass lookup, WeatherKit requests and the narrative
@@ -1494,7 +1488,7 @@ All three tabs are functional in MVP. The Routes tab (S19, S20) came into MVP wi
 - GPS and ride data: stored locally only, apart from a free ride's start coordinate sent for its place name (below), which the rider can turn off
 - Route surface lookup (#252): after a route is imported, its line — the planned route, never a recorded ride — is sent to the public OpenStreetMap Overpass API (`overpass-api.de`) to read the surface of the roads along it. Nothing else is sent, and no account or identifier is attached. A failed or offline lookup leaves the route without a surface; it is retried on the next launch, and the first failure in a batch stops the rest, so a refusing or unreachable server is not asked again and again. Surface data is credited "© OpenStreetMap contributors" wherever it is shown (ODbL). A Strava route is never sent, since Strava's API Policy forbids passing its data to a third party (§8.12)
 - Ride place name (#283): when a ride that did not follow a route is summarised (S10), its start coordinate — that one point, nothing else — is sent to Apple's reverse geocoder (MapKit `MKReverseGeocodingRequest`) for the name of the town it started in, used in the ride's default name ("Fargo Morning Loop"). A ride on a route is named for the route and sends nothing. The S12 **Place Names** toggle (on by default) turns the lookup off, and the privacy policy says so. A failed or offline lookup keeps the offline name silently
-- Weather (#148): current conditions and the hourly forecast come from Apple's WeatherKit, which is sent one coordinate per request and nothing else — no account or identifier. Each M10.6 surface says which coordinates it sends (the rider's location, a route's start, or points ahead on a loaded route for rain alerts). The Start sheet (S05.1, #149) sends the start of the chosen route (#559) as it opens and whenever the route changes; with no route it sends the rider's current location, only when location access is already granted. During a ride (W10, #150) it sends the rider's current location when a location fix arrives and the forecast is 10 minutes old, or a minute after a failed request. A Strava route's points are not sent (§8.12, OQ-S4), whether or not W10 is on a page. With a route loaded, each of those forecasts also checks the route ahead for rain (#152), sending up to seven points along the stretch the rider reaches within two hours, one request each: at most about 40 requests an hour. It checks only while the rider is on the route and the dashboard is on screen during a recording ride. Paused, locked, minimised or in the background, it sends nothing. W10's sheet (#561) sends up to seven points ahead along the route when it opens, and not again within 10 minutes. Nothing from either is stored. The current conditions from each of those forecasts are kept with the ride, on the device, for S15's weather summary (#151): nothing more is sent for them. It never asks for access itself, and the privacy policy says so. A failed or offline request leaves that surface's empty state, and WeatherKit data is credited with the Apple Weather mark and legal link wherever it is shown
+- Weather (#148): current conditions and the hourly forecast come from Apple's WeatherKit, which is sent one coordinate per request and nothing else — no account or identifier. Each M10.6 surface says which coordinates it sends (the rider's location, a route's start, or points ahead on a loaded route for rain alerts). The Start sheet (S05.1, #149) sends the start of the chosen route (#559) as it opens and whenever the route changes; with no route it sends the rider's current location, only when location access is already granted. During a ride (W10, #150) it sends the rider's current location when a location fix arrives and the forecast is 10 minutes old, or a minute after a failed request, whether or not W10 is on a page. A Strava route's points are not sent (§8.12, OQ-S4). With a route loaded, each of those forecasts also checks the route ahead for rain (#152), sending up to seven points along the stretch the rider reaches within two hours, one request each: at most about 40 requests an hour. It checks only while the rider is on the route and the dashboard is on screen during a recording ride. Paused, locked, minimised or in the background, it sends nothing. W10's sheet (#561) sends up to seven points ahead along the route when it opens, and not again within 10 minutes. Nothing from either is stored. The current conditions from each of those forecasts are kept with the ride, on the device, for S15's weather summary (#151): nothing more is sent for them. It never asks for access itself, and the privacy policy says so. A failed or offline request leaves that surface's empty state, and WeatherKit data is credited with the Apple Weather mark and legal link wherever it is shown
 - Route narrative (#203): written by Apple's on-device model (`FoundationModels`) from the route's computed terrain. Nothing is sent off the device
 - App Intents (§8.11): ride titles, dates, distances and route names are indexed in Spotlight's on-device index. Siri and Shortcuts read them through the app's intents. Nothing is sent to a server by the app. Strava routes are not indexed (§8.12)
 - Strava token service (#625, Phase 2, §8.12): connecting Strava sends the authorization code, and afterwards the refresh token (to refresh) or a token (to disconnect), to Cyclometer's token service at `acmeapps.xyz`. The service adds the app's client secret and forwards each to Strava. It sees the code, the tokens and Strava's answer (which includes the athlete's public profile) in transit, and stores and logs none of them. Strava's deauthorization webhook reaches the same service and is acknowledged without being stored. Nothing is sent until the rider connects Strava
@@ -1538,10 +1532,10 @@ All three tabs are functional in MVP. The Routes tab (S19, S20) came into MVP wi
 | M12 | App Store submission |
 
 ### Phase 2 — Companion & History (Target: +2 months post-launch)
-Route service integrations (tribos.studio, Strava, Ride with GPS) with the Settings → Accounts section that authenticates them, plus S20's current weather and Strava segments — the Routes tab itself shipped in M8. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Multi-bike management — bikes own their sensors, circumference lives on the speed sensor (DataModel.md §3.9) — plus the S05.1 bike picker.
+Route service integrations (tribos.studio, Strava, Ride with GPS) with the Settings → Accounts section that authenticates them, plus S20's current weather — the Routes tab itself shipped in M8. Ride history (S14) + detail view (S15) with vehicle pass timeline. Apple Watch app + complication (S17). HR/cadence graphs. Strava/Garmin export. Dashboard customization (S07, S08). Multi-bike management — bikes own their sensors, circumference lives on the speed sensor (DataModel.md §3.9) — plus the S05.1 bike picker.
 
 ### Phase 3 — AR, Power & Platform (Target: +4 months post-Phase 2)
-Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detection.
+Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18).
 
 ---
 
@@ -1589,6 +1583,7 @@ Power meter BLE support, ENGO 2 / ActiveLook AR integration (S18), segment detec
 | **`.fit` route import** | GPX only. Every route source the rider plans on exports GPX, and a second parser buys nothing |
 | **In-app route creation** | Riders plan routes externally (tribos.studio, Komoot, Strava) and import GPX |
 | **`MKDirections` routing** | Resolved out of scope for MVP (OQ12) |
+| **Live Strava segments during a ride** | Strava licenses Live Segments to partner devices and apps only, for its subscribers. Building it from Strava's segment data would replicate Strava functionality, which its API terms forbid (§8.12). A ride's segments show on S15 after Strava processes the upload |
 
 ---
 

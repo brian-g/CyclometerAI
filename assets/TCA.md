@@ -6,7 +6,7 @@
 **Updated:** 2026-09-30 - §3 and §8 rewritten to match the implemented tree (#339, #342)  
 **Updated:** 2026-10-09 - `AltimeterClient` and `LocationUpdate.verticalAccuracy` (#387)  
 **Updated:** 2026-11-24 - §4.15 `StravaClient` built (#627): `refreshAccessToken(rejected:)` on `StravaAuthClient`, `StravaError`, rate-limit reset at midnight UTC when a daily count is spent  
-**Updated:** 2026-11-25 - §4.15 follows Strava's API terms (PRD §8.12 v0.6.28): `StravaRoutesFeature` caches Strava routes rather than importing them, `AppFeature` purges Strava data older than seven days, and the `segments` children refetch after a day  
+**Updated:** 2026-11-25 - §4.15 follows Strava's API terms (PRD §8.12 v0.6.28): `StravaRoutesFeature` caches Strava routes rather than importing them, `AppFeature` purges Strava data older than seven days, and S15's `segments` child refetches after a day and presents S15.1. S20's `segments` child and `RouteSegmentMatcher` are dropped with S20 segments (#637)  
 **Status:** Draft — Ready for Engineering Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Companion Documents:** `PRD.md §11`, `BLE.md`, `DataModel.md`
@@ -906,7 +906,8 @@ struct KeychainClient {
 /// ASWebAuthenticationSession or the Strava app, then the token service. Owns refresh: an actor inside the live
 /// value (`StravaSession`) serializes it, so concurrent requests refresh once and the rotated refresh token is
 /// written first. Owns Strava's `ConnectedService` record in the AppPreferences document: connect saves it, a
-/// refused refresh or a missing Keychain item flags `isDisconnected`, disconnect removes it (#626).
+/// refused refresh or a missing Keychain item flags `isDisconnected`, disconnect removes it (#626). A refused refresh
+/// also deletes the Strava caches, as disconnect does (PRD §8.12): no feature sees the refusal, so the client owns it.
 @DependencyClient
 struct StravaAuthClient {
     var connect:        @Sendable () async throws -> ConnectedService    // OAuth + exchange + Keychain write + record
@@ -922,9 +923,10 @@ struct StravaClient {
     var uploadStatus:    @Sendable (StravaUploadID) async throws -> StravaUploadStatus   // .processing / .ready(activityID) / .duplicate(activityID) / .failed(reason)
     var segmentEfforts:  @Sendable (_ activityID: String) async throws -> [StravaSegmentEffort]
     var routes:          @Sendable (_ page: Int) async throws -> [StravaRouteSummary]
-    var route:           @Sendable (_ routeID: String) async throws -> StravaRouteDetail  // segments
+    var route:           @Sendable (_ routeID: String) async throws -> StravaRouteDetail  // segments; kept, not called (#637)
     var routeGPX:        @Sendable (_ routeID: String) async throws -> Data
-    var bikes:           @Sendable () async throws -> [StravaGear]                       // later, Multi-bike
+    var athlete:         @Sendable () async throws -> StravaAthlete                      // name, photo URL; S12.1, each appearance
+    var bikes:           @Sendable () async throws -> [StravaGear]                       // later, Multi-bike; same GET /athlete
     var setGear:         @Sendable (_ activityID: String, _ gearID: String) async throws -> Void
 }
 ```
@@ -947,22 +949,22 @@ documented, and the browser (#634) picks the rides. Reducers use `StravaClient.m
 
 | Feature | Scope | Does |
 |---|---|---|
-| `AccountsFeature` | `SettingsFeature` | S12 Accounts rows and S12.1: connect, disconnect, Reconnect, granted scopes |
+| `AccountsFeature` | `SettingsFeature` | S12 Accounts rows and S12.1: connect, disconnect, granted scopes. S12.1's `.task` fetches `athlete` each time it appears, for the name and photo, and stores neither: the photo loads through a session with no URL cache, so it never reaches the disk; a disconnected account shows as not connected |
 | `SyncQueueFeature` | `AppFeature` (app-lifetime) | Runs uploads after S10 closes: upload, poll `uploadStatus` (1, 2, 4, then 8 s, for 2 min), write `RideSyncRecord`. On launch resumes records left `pending` or `processing`. Replaces `SyncClient.uploadRide`'s single call |
 | `RideSummaryFeature` | — | Gains `syncDestinations: [SyncDestination: Bool]` for S10's Sync To; `.task` loads the defaults; `.finishTapped` and dismissal save them and send the chosen services to `SyncQueueFeature`. Health is a destination like the services: on, the close sets `isHealthWorkoutOwed` and writes the workout; off, it clears the flag and nothing is written. No write at save. `RideSyncSheetFeature` is retired |
-| `StravaRoutesFeature` | S19 and S05.2 | Paged list of the rider's Strava routes, refetched when shown and more than a day old; a route gone from Strava is deleted from the cache. Opening or choosing one fetches `routeGPX` and `route`, parses and analyses through `GPXRouteImporter` without the surface lookup or narrative, and writes a cached Strava route row under its derived id (DataModel.md §3.8.1). Nothing is imported into the library |
+| `StravaRoutesFeature` | S19 and S05.2 | Paged list of the rider's Strava routes, refetched when shown and more than a day old. A cached route is deleted as gone from Strava only when its own fetch answers 404, or when the list has been read to its last page without it: the list is paged, so a route missing from a partial read stays. Opening or choosing one fetches `routeGPX`, parses and analyses through `GPXRouteImporter` without the surface lookup or narrative, and writes a cached Strava route row under its derived id (DataModel.md §3.8.1). Nothing is imported into the library |
 
 Strava data is a cache of at most seven days (PRD §8.12, DataModel.md §3.8.1). `AppFeature` purges what is older,
 at launch and when the scene becomes active, through `PersistenceClient`: cached Strava routes are deleted and ride
 efforts cleared. Disconnecting, or a refused refresh, deletes all of it in the same way.
 
-S15's `RideDetailFeature` and S20's `RouteDetailFeature` each gain a `segments` child: load the cache, fetch when it
-is missing or more than a day old and the device is online (S15: also when empty and the upload is under ten minutes
-old), save it. A Strava route's own segments come with the route, so S20 refetches the whole route.
-S20's also reads the efforts of the route's synced previous rides, fetching up to five uncached, and merges them
-with the route's own segments through `RouteSegmentMatcher` — a pure function (segment endpoints within 30 m of the
-polyline, ordered by distance along it, best time per segment) with its own unit tests. No Explore Segments call
-(PRD §8.12).
+S15's `RideDetailFeature` gains a `segments` child: load the cache, fetch when it is missing or more than a day old
+and the device is online (also when empty and the upload is under ten minutes old), save it. It presents S15.1
+(UX.md §S15.1). S20 has no segments: dropped from Phase 2 (#637). `RouteDetailFeature` still refetches a Strava
+route it shows that is more than a day old, when the device is online (PRD §8.12), replacing the row in place, and
+deletes it when Strava answers 404: S20 is reached from S15's Route section too, not only from the Strava tab. `StravaClient.route` and `StravaRouteSegment` stay, built and
+tested in #627, for a later feature that shows a route's segments, but nothing calls them: no screen shows a route's
+segments, and each call would spend the app's shared read limit on data that is cached and then thrown away.
 
 ---
 
