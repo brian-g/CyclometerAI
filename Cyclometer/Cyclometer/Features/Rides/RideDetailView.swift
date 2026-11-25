@@ -72,14 +72,14 @@ struct RideDetailList<MapHeader: View>: View {
             }
             RideSummarySection(stats: store.stats, unit: store.unitSystem) { passes in
                 // A `Button`, not a `NavigationLink`, as it opens a sheet, so the chevron saying
-                // the row opens something is drawn here (#660), in the system indicator's style.
+                // the row opens something is added here (#660). `_DisclosureIndicator` is the
+                // system's own, so it matches the Route row's and follows Increase Contrast. It is
+                // underscored: if an SDK drops it, hand-match `chevron.forward` in `.tertiary`.
                 Button { store.send(.passesTapped) } label: {
                     LabeledContent("Vehicle Passes") {
                         HStack {
                             Text(passes.formatted())
-                            Image(systemName: "chevron.forward")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color.cyTextTertiary)
+                            _DisclosureIndicator()
                                 .accessibilityHidden(true)
                         }
                     }
