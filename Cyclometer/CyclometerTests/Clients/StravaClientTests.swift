@@ -4,9 +4,9 @@ import Testing
 @testable import Cyclometer
 
 /// `StravaClient`'s live value (#627, PRD §8.12) against a scripted Strava answering with the JSON
-/// fixtures in `Fixtures/`. They're built from the samples in Strava's API reference with made-up
-/// ids, names and places: the repo is public, so no recorded answer is committed. `StravaLiveTests`
-/// checks the decoders against Strava itself.
+/// fixtures in `Fixtures/`. Their values are made up (the repo is public, so no recorded answer is
+/// committed), and their keys follow Strava's real answers as `StravaLiveTests.answerShapes` printed
+/// them, not the reference's samples, which show segment stats the real answers don't carry.
 @Suite("StravaClient")
 struct StravaClientTests {
     /// 2027-01-15 08:00:00 UTC, on a quarter hour.
@@ -167,41 +167,29 @@ struct StravaClientTests {
         effortID: "2801117330", segmentID: "365235", name: "Tunnel Road",
         distanceMeters: 1826.4, averageGradePercent: 4.1, elapsedSeconds: 412, startIndex: 1110, climbCategory: 0,
         startLatitude: 37.8581, startLongitude: -122.2402, endLatitude: 37.8655, endLongitude: -122.2265,
-        prRank: 3, komRank: nil, bestElapsedSeconds: nil, bestDate: nil
+        prRank: 3, komRank: nil
     )
 
     static let grizzlyPeak = StravaSegmentEffort(
         effortID: "2801117331", segmentID: "673683", name: "Grizzly Peak Climb",
         distanceMeters: 3412.8, averageGradePercent: 6.4, elapsedSeconds: 1052, startIndex: 2280, climbCategory: 2,
         startLatitude: 37.8702, startLongitude: -122.2541, endLatitude: 37.8811, endLongitude: -122.2433,
-        prRank: 1, komRank: 7, bestElapsedSeconds: nil, bestDate: nil
+        prRank: 1, komRank: 7
     )
 
-    @Test("Segment efforts decode in ride order with the rider's best, and a segment without a location is dropped")
+    /// Strava's answer has no best time (`StravaLiveTests.answerShapes`), so none is decoded.
+    @Test("Segment efforts decode in ride order with PR and KOM ranks, and a segment without a location is dropped")
     func segmentEffortsDecode() async throws {
         let server = Server(["GET /api/v3/activities/9000000001": try Self.ok("strava-activity-efforts")])
 
         let efforts = try await Self.makeClient(server).segmentEfforts("9000000001")
 
-        var tunnel = Self.tunnelRoad
-        tunnel.bestElapsedSeconds = 398                                  // the segment's athlete_pr_effort
-        tunnel.bestDate = try Self.date("2026-06-14T13:05:10Z")
-        var grizzly = Self.grizzlyPeak
-        grizzly.bestElapsedSeconds = 1052                                // the effort's athlete_segment_stats
-        grizzly.bestDate = try Self.date("2026-11-21T00:00:00Z")
-        #expect(efforts == [tunnel, grizzly])
+        #expect(efforts == [Self.tunnelRoad, Self.grizzlyPeak])
 
         let url = try #require(server.requests.value.first?.url)
         #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems == [
             URLQueryItem(name: "include_all_efforts", value: "true"),
         ])
-    }
-
-    @Test("A free account's efforts decode without the subscriber-only best time")
-    func freeSegmentEffortsDecode() async throws {
-        let server = Server(["GET /api/v3/activities/9000000001": try Self.ok("strava-activity-efforts-free")])
-
-        #expect(try await Self.makeClient(server).segmentEfforts("9000000001") == [Self.tunnelRoad, Self.grizzlyPeak])
     }
 
     @Test("An activity with no efforts decodes as none")
@@ -245,7 +233,7 @@ struct StravaClientTests {
         #expect(server.requests.value.isEmpty)
     }
 
-    @Test("A route's segments decode with the rider's best")
+    @Test("A route's segments decode, without a best time, which Strava's answer doesn't carry")
     func routeDetailDecodes() async throws {
         let server = Server(["GET /api/v3/routes/3344024577052366532": try Self.ok("strava-route-detail")])
 
@@ -255,23 +243,13 @@ struct StravaClientTests {
         #expect(detail.segments == [
             StravaRouteSegment(
                 segmentID: "673683", name: "Grizzly Peak Climb", distanceMeters: 3412.8, averageGradePercent: 6.4,
-                climbCategory: 2, bestElapsedSeconds: 1052, bestDate: try Self.date("2026-11-21T14:40:02Z")
+                climbCategory: 2
             ),
             StravaRouteSegment(
                 segmentID: "365235", name: "Tunnel Road", distanceMeters: 1826.4, averageGradePercent: 4.1,
-                climbCategory: 0, bestElapsedSeconds: 398, bestDate: try Self.date("2026-06-14T00:00:00Z")
+                climbCategory: 0
             ),
         ])
-    }
-
-    @Test("A free account's route segments decode without the best time")
-    func freeRouteDetailDecodes() async throws {
-        let server = Server(["GET /api/v3/routes/3344024577052366532": try Self.ok("strava-route-detail-free")])
-
-        let detail = try await Self.makeClient(server).route("3344024577052366532")
-
-        #expect(detail.segments.map(\.segmentID) == ["673683", "365235"])
-        #expect(detail.segments.allSatisfy { $0.bestElapsedSeconds == nil && $0.bestDate == nil })
     }
 
     @Test("A route's GPX is returned as Strava sent it")

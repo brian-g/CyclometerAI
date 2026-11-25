@@ -940,7 +940,8 @@ throws `StravaError.rateLimited(until:)` on a 429. `until` is the next midnight 
 otherwise the next quarter hour. Its other errors are `.unauthorized` (a 401 after the refresh), `.http(status:)`
 and `.invalidResponse`; a missing or disconnected account throws `StravaAuthError`. Uploads are multipart, the GPX
 gzipped (`gpx.gz`, `sport_type=Ride`). `StravaWire` decodes Strava's JSON into the cached models
-(DataModel.md §3.8.1), with every subscriber-only field optional. Route `type` is passed through: its values aren't
+(DataModel.md §3.8.1). It reads no best time: Strava's activity and route answers don't carry one, whatever its
+reference shows (checked with `StravaLiveTests`). Route `type` is passed through: its values aren't
 documented, and the browser (#634) picks the rides. Reducers use `StravaClient.mock(...)`.
 
 | Feature | Scope | Does |

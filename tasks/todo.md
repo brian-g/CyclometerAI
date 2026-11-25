@@ -3364,3 +3364,9 @@ Fixtures synthesized from Strava's reference (repo is public); an opt-in live te
 - Live check (Brian, 2026-11-24): StravaLiveTests 5/5 against Strava. 10 routes, all type 1 / subType 1 (no run
   routes to compare, so #634 should keep `type == 1` rather than drop a guessed run value); route detail 1 segment,
   GPX 45,860 bytes; 2 bikes; an activity with 49 efforts, 0 PRs, 0 with a best (expected for a free account).
+- Best time (2026-11-25): `StravaLiveTests.answerShapes` printed the key paths of real answers. Neither the
+  activity's efforts (a ride with 4 PRs, visibility everyone, subscriber account) nor a route's segments carry
+  `athlete_segment_stats` / `athlete_pr_effort`, whatever Strava's reference shows. `StravaWire` no longer reads a best
+  time; the fixtures follow the real keys and the `-free` variants are gone. `pr_rank` decoded on the real ride (4/4).
+  A first effort on a segment gets no `pr_rank` or achievement. PRD §8.12, UX S15/S20, DataModel §3.8.1 and TCA §4.15
+  updated; whether `GET /segments/:id` carries the best time is left to #633.

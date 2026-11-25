@@ -7,10 +7,14 @@ private let logger = Logger.cyclometer(.network)
 /// Strava's JSON answers (developers.strava.com/docs/reference), decoded and mapped to the domain
 /// models in `StravaModels`.
 ///
-/// Everything Strava may leave out is optional: the subscriber-only fields (`athlete_segment_stats`,
-/// `athlete_pr_effort`) for a free account, `pr_rank` and `kom_rank` when the effort earned none.
-/// Dates are read as strings and parsed leniently, because Strava writes `pr_date` both as
-/// `"2015-02-12"` and as a full timestamp. One malformed row is dropped, not the whole answer.
+/// Everything Strava may leave out is optional, such as `pr_rank` and `kom_rank` when the effort
+/// earned none (a first effort on a segment never does). One malformed row is dropped, not the
+/// whole answer.
+///
+/// No best time is read. Strava's reference shows `athlete_segment_stats` / `athlete_pr_effort` on
+/// segments, but its real activity and route answers carry neither, even for a subscriber on a ride
+/// with PRs (checked with `StravaLiveTests.answerShapes`, 2026-11-25). How S15 and S20 get one is
+/// #633's decision.
 enum StravaWire {
     // MARK: - Uploads
 
@@ -57,7 +61,6 @@ enum StravaWire {
             logger.notice("dropped Strava effort \(effort.id, privacy: .public): its segment has no start or end")
             return nil
         }
-        let best = effort.athleteSegmentStats ?? segment.athletePrEffort ?? segment.athleteSegmentStats
         return StravaSegmentEffort(
             effortID: String(effort.id),
             segmentID: String(segment.id),
@@ -72,9 +75,7 @@ enum StravaWire {
             endLatitude: end.latitude,
             endLongitude: end.longitude,
             prRank: effort.prRank,
-            komRank: effort.komRank,
-            bestElapsedSeconds: best?.elapsedSeconds,
-            bestDate: best?.date
+            komRank: effort.komRank
         )
     }
 
@@ -89,15 +90,12 @@ enum StravaWire {
     static func routeDetail(from data: Data) throws -> StravaRouteDetail {
         let route = try decode(Route.self, from: data)
         let segments = (route.segments ?? []).map { segment in
-            let best = segment.athletePrEffort ?? segment.athleteSegmentStats
-            return StravaRouteSegment(
+            StravaRouteSegment(
                 segmentID: String(segment.id),
                 name: segment.name,
                 distanceMeters: segment.distance ?? 0,
                 averageGradePercent: segment.averageGrade ?? 0,
-                climbCategory: segment.climbCategory ?? 0,
-                bestElapsedSeconds: best?.elapsedSeconds,
-                bestDate: best?.date
+                climbCategory: segment.climbCategory ?? 0
             )
         }
         return StravaRouteDetail(summary: route.summary, segments: segments)
@@ -132,12 +130,10 @@ enum StravaWire {
         }
     }
 
-    /// A Strava timestamp (`2018-02-20T18:02:13Z`) or a bare date (`2015-02-12`, taken as UTC).
+    /// A Strava timestamp (`2018-02-20T18:02:13Z`); nil when it doesn't parse, rather than failing
+    /// the answer.
     static func date(_ string: String?) -> Date? {
-        guard let string else { return nil }
-        if let date = try? Date(string, strategy: .iso8601) { return date }
-        if let date = try? Date(string, strategy: .iso8601.year().month().day()) { return date }
-        return nil
+        string.flatMap { try? Date($0, strategy: .iso8601) }
     }
 }
 
@@ -163,7 +159,6 @@ private extension StravaWire {
         var prRank: Int?
         var komRank: Int?
         var segment: Segment
-        var athleteSegmentStats: BestEffort?
     }
 
     struct Segment: Decodable {
@@ -174,20 +169,6 @@ private extension StravaWire {
         var climbCategory: Int?
         var startLatlng: [Double]?
         var endLatlng: [Double]?
-        var athletePrEffort: BestEffort?
-        var athleteSegmentStats: BestEffort?
-    }
-
-    /// The rider's best on a segment. Strava's reference names it two ways — `pr_elapsed_time`
-    /// and `pr_date`, or an effort's `elapsed_time` and `start_date` — so both are read.
-    struct BestEffort: Decodable {
-        var prElapsedTime: Int?
-        var prDate: String?
-        var elapsedTime: Int?
-        var startDate: String?
-
-        var elapsedSeconds: Int? { prElapsedTime ?? elapsedTime }
-        var date: Date? { StravaWire.date(prDate ?? startDate) }
     }
 
     struct Route: Decodable {

@@ -51,7 +51,7 @@
 | 0.6.23 | 2026-11-21 | Brian / Claude | Strava (Phase 2). New §8.12: connecting through a stateless token service that holds the client secret, Keychain tokens, uploads chosen per ride in S10's Sync To section, segment efforts on S15, and segments on S20 from a Strava route itself or, for any route, from its previous rides synced to Strava (Explore Segments is closed to Standard-tier apps since 2026-09-01), Strava route import on S19 and S05.2, and gear with Multi-bike later. §6 and §8.6 point to it. |
 | 0.6.22 | 2026-11-19 | Brian / Claude | Orphan workouts (#584). §9.4's #318 decision note: an orphan closed out at relaunch that the rider had already ended keeps its real end time and gets its `HKWorkout` (UX.md §S10). One with no ride-end marker still gets none, since its end is the relaunch. |
 | 0.6.26 | 2026-11-23 | Brian / Claude | Strava token service (#625). §12 Privacy records what the service sees: the code and tokens in transit to Strava, stored and logged nowhere. §8.12 corrects what the webhook does: the stateless service only acknowledges a deauthorization, and the app learns of it from a refused refresh. The service runs as Cloudflare Pages Functions in the acmeapps.xyz repo. |
-| 0.6.27 | 2026-11-24 | Brian / Claude | Strava client (#627). §8.12 Limits and terms: a 429 waits until midnight UTC when a daily limit is spent, not just for the next quarter hour, since retrying every 15 minutes all day would only add refused requests that still count. |
+| 0.6.27 | 2026-11-24 | Brian / Claude | Strava client (#627). §8.12 Limits and terms: a 429 waits until midnight UTC when a daily limit is spent, not just for the next quarter hour, since retrying every 15 minutes all day would only add refused requests that still count. §8.12 segments: Strava's activity and route answers carry no best time, even for a subscriber (checked against Strava), so S15's best time is #633's decision and S20's is the rider's fastest effort among the route's rides. |
 
 ---
 
@@ -1087,8 +1087,9 @@ Strava activity history into Cyclometer, and on-device segment detection (Phase 
 returns its segment efforts. Strava matches segments after processing, so an empty answer within ten minutes of the
 upload is retried the next time S15 appears; otherwise the efforts are cached on the ride and refreshed only by
 pull to refresh. Each effort shows the segment's name, distance and average grade, the effort's elapsed time, a PR
-medal for `pr_rank` 1–3 and a KOM/QOM rank in the top 10 — all free to every Strava account. The rider's best time
-and its date are subscriber-only on Strava's API (since June 2020): shown when Strava returns them, never asked for.
+medal for `pr_rank` 1–3 and a KOM/QOM rank in the top 10 — all free to every Strava account (a first effort on a
+segment gets neither). The rider's best time and its date are not in this answer, even for a subscriber on a ride with
+PRs (checked against Strava in #627). Whether S15 shows them, and from which call, is #633's decision.
 
 **Segments on Route Detail (S20).** Two sources, both open to a Standard-tier app:
 
@@ -1098,9 +1099,9 @@ and its date are subscriber-only on Strava's API (since June 2020): shown when S
   lie within 30 m of the route's polyline, so a detour's segments are left out. Rides whose efforts aren't cached are
   fetched when S20 appears, the five most recent at most, into the cache S15 reads
 - Merged by segment id and listed once each, in order of distance along the route. Each row: name, distance, average
-  grade and climb category. The best time and its date are Strava's PR when Strava returns it (subscribers; it covers
-  all the rider's Strava activities), otherwise the rider's fastest effort among the route's rides. That is the
-  rider's own data, so free accounts get it too
+  grade and climb category. The best time and its date are the rider's fastest effort among the route's rides. That
+  is the rider's own data, so free accounts get it too. Strava's route answer carries no PR (#627); whether to fetch
+  Strava's PR from another call is #633 and #635's decision
 - A route from Files that has never been ridden, or whose rides were never synced, has no segments section
 
 > **Not used: Explore Segments.** Matching segments to an unridden GPX route needs `GET /api/v3/segments/explore`,

@@ -54,8 +54,8 @@ struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var prRank: Int?
     /// 1–10 on the segment's leaderboard.
     var komRank: Int?
-    /// The rider's best time on the segment and its date. Subscriber-only on Strava's side, so
-    /// nil for a free account.
+    /// The rider's best time on the segment and its date. Strava's activity answer doesn't carry
+    /// them, so `StravaClient` leaves them nil; #633 decides how they are filled.
     var bestElapsedSeconds: Int?
     var bestDate: Date?
 }
@@ -69,7 +69,8 @@ struct StravaRouteSegment: Codable, Equatable, Sendable {
     var averageGradePercent: Double
     /// 0 = uncategorized … 5 = HC.
     var climbCategory: Int
-    /// Subscriber-only on Strava's side.
+    /// Strava's route answer doesn't carry it, so `StravaClient` leaves it nil; #633 and #635
+    /// decide how it is filled.
     var bestElapsedSeconds: Int?
     var bestDate: Date?
 }
