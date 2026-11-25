@@ -6,6 +6,7 @@
 **Updated:** 2026-09-30 - §3 and §8 rewritten to match the implemented tree (#339, #342)  
 **Updated:** 2026-10-09 - `AltimeterClient` and `LocationUpdate.verticalAccuracy` (#387)  
 **Updated:** 2026-11-24 - §4.15 `StravaClient` built (#627): `refreshAccessToken(rejected:)` on `StravaAuthClient`, `StravaError`, rate-limit reset at midnight UTC when a daily count is spent  
+**Updated:** 2026-11-25 - §4.15 follows Strava's API terms (PRD §8.12 v0.6.28): `StravaRoutesFeature` caches Strava routes rather than importing them, `AppFeature` purges Strava data older than seven days, and the `segments` children refetch after a day  
 **Status:** Draft — Ready for Engineering Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Companion Documents:** `PRD.md §11`, `BLE.md`, `DataModel.md`
@@ -949,10 +950,15 @@ documented, and the browser (#634) picks the rides. Reducers use `StravaClient.m
 | `AccountsFeature` | `SettingsFeature` | S12 Accounts rows and S12.1: connect, disconnect, Reconnect, granted scopes |
 | `SyncQueueFeature` | `AppFeature` (app-lifetime) | Runs uploads after S10 closes: upload, poll `uploadStatus` (1, 2, 4, then 8 s, for 2 min), write `RideSyncRecord`. On launch resumes records left `pending` or `processing`. Replaces `SyncClient.uploadRide`'s single call |
 | `RideSummaryFeature` | — | Gains `syncDestinations: [SyncDestination: Bool]` for S10's Sync To; `.task` loads the defaults; `.finishTapped` and dismissal save them and send the chosen services to `SyncQueueFeature`. Health is a destination like the services: on, the close sets `isHealthWorkoutOwed` and writes the workout; off, it clears the flag and nothing is written. No write at save. `RideSyncSheetFeature` is retired |
-| `StravaRoutesFeature` | S19 and S05.2 | Paged browser; choosing fetches `routeGPX`, imports through `GPXRouteImporter`, upserts by `stravaRouteID` |
+| `StravaRoutesFeature` | S19 and S05.2 | Paged list of the rider's Strava routes, refetched when shown and more than a day old; a route gone from Strava is deleted from the cache. Opening or choosing one fetches `routeGPX` and `route`, parses and analyses through `GPXRouteImporter` without the surface lookup or narrative, and writes a cached Strava route row under its derived id (DataModel.md §3.8.1). Nothing is imported into the library |
+
+Strava data is a cache of at most seven days (PRD §8.12, DataModel.md §3.8.1). `AppFeature` purges what is older,
+at launch and when the scene becomes active, through `PersistenceClient`: cached Strava routes are deleted and ride
+efforts cleared. Disconnecting, or a refused refresh, deletes all of it in the same way.
 
 S15's `RideDetailFeature` and S20's `RouteDetailFeature` each gain a `segments` child: load the cache, fetch when it
-is missing (S15: also when empty and the upload is under ten minutes old; S20: also after seven days), save it.
+is missing or more than a day old and the device is online (S15: also when empty and the upload is under ten minutes
+old), save it. A Strava route's own segments come with the route, so S20 refetches the whole route.
 S20's also reads the efforts of the route's synced previous rides, fetching up to five uncached, and merges them
 with the route's own segments through `RouteSegmentMatcher` — a pure function (segment endpoints within 30 m of the
 polyline, ordered by distance along it, best time per segment) with its own unit tests. No Explore Segments call

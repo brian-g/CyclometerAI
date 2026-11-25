@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-24 (#628) — Schema 1.3 built: the Strava cache columns on `Ride` and `Route`, `SyncStatus.processing`, and `ConnectedService`, `connectedServices` and `syncDestinationDefaults` in the AppPreferences document. `SyncDestination` is stored by name, so the defaults are a JSON object and an unknown destination is dropped alone. §1, §3.1, §3.7, §3.8, §9 and OQDM7 updated.  
+**Updated:** 2026-11-25 (Strava API terms, PRD §8.12 v0.6.28) — §3.8.1: Strava data is a cache of at most seven days, so a Route with a `stravaRouteID` is a cached Strava route, not an import. Its id is derived from the Strava id, `stravaSegmentsFetchedAt` is its fetch time, and it is deleted seven days after that fetch or on disconnect. Ride efforts follow the same cache. §10's cache test and OQDM11 (a Strava route's name on a ride) follow. No schema change.  
+**Previously:** 2026-11-24 (#628) — Schema 1.3 built: the Strava cache columns on `Ride` and `Route`, `SyncStatus.processing`, and `ConnectedService`, `connectedServices` and `syncDestinationDefaults` in the AppPreferences document. `SyncDestination` is stored by name, so the defaults are a JSON object and an unknown destination is dropped alone. §1, §3.1, §3.7, §3.8, §9 and OQDM7 updated.  
 **Previously:** 2026-11-21 (Strava, PRD §8.12) — §3.8 ConnectedService becomes a `Codable` value in the AppPreferences document, with Keychain `OAuthTokens`, granted scopes and S10's remembered sync defaults. New §3.8.1: segment efforts cached on `Ride`, Strava route id and segments on `Route`. §9 adds schema 1.3.  
 **Previously:** 2026-11-20 (#606) — §3.1: `isHealthWorkoutOwed` is not set for a launch close-out with no ride-end marker. Its end is the relaunch, so it is finalized never owed a workout, in the same write. Documentation only; no schema change.
 **Previously:** 2026-11-19 (#588) — §11: OQDM6 and OQDM7 record what superseded their original answers (§3.7, §3.8), instead of contradicting them. §9 gains rows for #175's five crash-resume fields, #263's `trackSegmentIndex`, #277's `isHealthWorkoutOwed` and #406's `isRouteComplete`, and the MVP rows are renumbered into the order they shipped. Documentation only; no schema change.
@@ -891,18 +892,21 @@ struct OAuthTokens: Codable, Sendable {
 
 ### 3.8.1 Cached Strava data
 
-Read from Strava, kept for display, and deleted when Strava is disconnected (PRD §8.12). Both are optional JSON
-columns, so the migration is lightweight.
+Read from Strava, kept for display, and never kept for long. Strava's API Policy allows its data only in a cache of at
+most seven days, so every item has a fetch time (PRD §8.12, Strava data on the device). When shown, an item more
+than a day old is refetched if the device is online. Seven days after its fetch it is deleted, at launch and whenever
+the app becomes active. Disconnecting, or a refused refresh, deletes all of it at once. The columns are optional, so
+the migration is lightweight.
 
 ```swift
 // Ride (§3.1) gains:
 //     var stravaSegmentEffortsData: Data?     // [StravaSegmentEffort]; nil = never fetched, [] = none
-//     var stravaSegmentsFetchedAt: Date?
+//     var stravaSegmentsFetchedAt: Date?      // expiry clears both columns; the ride itself stays
 
 // Route (§3.10) gains:
-//     var stravaRouteID: String?              // set by a Strava import; re-import updates in place by it
+//     var stravaRouteID: String?              // non-nil = a cached Strava route (below), not a library route
 //     var stravaSegmentsData: Data?           // [StravaRouteSegment]
-//     var stravaSegmentsFetchedAt: Date?      // refetched after seven days
+//     var stravaSegmentsFetchedAt: Date?      // a Strava route's fetch time: line, analysis and segments together
 
 struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var effortID: String
@@ -934,6 +938,20 @@ struct StravaRouteSegment: Codable, Equatable, Sendable {
     var bestDate: Date?
 }
 ```
+
+**Cached Strava routes.** A Strava route is browsed, not imported (PRD §8.12 Routes), but it is still a `Route` row,
+so the map, S20, S05.2 and navigation read it like any other. What sets it apart is a non-nil `stravaRouteID`:
+
+- `id` is a version 5 (name-based) UUID of `strava-route:<stravaRouteID>` in a fixed app namespace. Every fetch of the
+  same Strava route gets the same id, so `Ride.routeId` on rides that followed it relinks after it expired or after a
+  reconnect, with no Strava id stored on the ride
+- A fetch writes the whole row at once: the GPX parse and `terrainData` from `GET /routes/:id/export_gpx`,
+  `stravaSegmentsData` from `GET /routes/:id`, and `stravaSegmentsFetchedAt`. A refetch replaces them in place
+- Seven days after `stravaSegmentsFetchedAt`, the row is deleted like a rider-deleted route
+- `surfaceData` stays nil (no Overpass lookup) and no narrative is written. S19's library query and `RouteEntity`
+  (Spotlight) filter on `stravaRouteID == nil`; S19's Strava section and S05.2 read the Strava rows
+
+A route the rider exported from Strava and opened as a file is a library route with a nil `stravaRouteID`.
 
 `RideSyncRecord` (§3.1) is unchanged; `SyncStatus` gains `processing` (uploaded, awaiting Strava's `activity_id`) so
 a ride quit mid-poll resumes polling rather than uploading again.
@@ -1403,7 +1421,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | PairedSensor role lookup | Unit — AppPreferencesTests | Correct sensor per role; nil when role unpaired; combo sensor at two roles |
 | ConnectedService Keychain round-trip | Integration — ConnectedServiceTests | Token stored in Keychain; keychainIdentifier retrieves correct token; a rewrite replaces; missing item reads nil; `AfterFirstUnlockThisDeviceOnly` |
 | Strava sign-in and refresh | Unit — StravaSessionTests | Ten concurrent `accessToken()` calls refresh once and store the rotated token; a refused refresh (400/401) marks disconnected; a record without its Keychain item is disconnected with no network call; connect saves tokens before the record; disconnect removes item, record and caches even when the revoke fails (#626) |
-| Strava cache clearing | Integration — StravaCachePersistenceTests | Disconnect clears ride segment efforts and route segments; sync records and `stravaRouteID` stay |
+| Strava cache clearing | Integration — StravaCachePersistenceTests | Disconnect deletes cached Strava routes and clears ride segment efforts; library routes, rides and their sync records stay. Expiry at seven days deletes a Strava route and clears a ride's efforts, and leaves a younger item. A refetched Strava route keeps its derived id, and a ride that followed it links to it again |
 | RideWeatherSample recording and storage | Unit — RideWeatherRecordingTests | Checkpoint, resume and finish keep the samples; none stored reads back empty; a non-finite reading is never recorded |
 | RideSyncRecord encoding/decoding | Unit — RideSyncTests | Round-trips through JSON; correct status transitions; remoteActivityId stored on success |
 
@@ -1423,6 +1441,7 @@ enum CyclometerMigrationPlan: SchemaMigrationPlan {
 | OQDM8 | What is mapOrientation for? | Resolved — it is real. PRD section 8.6 specifies heading-up vs north-up as a user-toggleable setting; stored in AppPreferences to persist across sessions. Landed at #199, governing the full-screen map sheet only; the W8 widget is always heading-up |
 | OQDM9 | Store bike information | Deferred to Phase 2, shape recorded in §3.9. A rider owns several bikes; each bike owns its speed/cadence/radar/power sensors and maps to a Strava gear id. Wheel circumference lives on the speed sensor, not on the bike and not on a wheelset entity — a hub-mounted CSC sensor is already bound to one wheel (research: PRD §8.9.1). Heart rate stays rider-scoped. Ride gains `bike` + a `bikeName` snapshot so history always names the bike ridden |
 | OQDM10 | Capture weather conditions for a ride | Resolved. A list of `RideWeatherSample`s stored as JSON on Ride, one per forecast fetched during the ride (#151). Fields: observation time, temperature, humidity, wind speed, wind direction, condition |
+| OQDM11 | A ride on a Strava route stores the route's name (`Ride.routeName`, and the default ride title) | Open. The name comes from Strava, so it may be Strava data that can't outlive the seven-day cache. The reading here: the title is the rider's, accepted or edited in S10 and uploaded as their own, and `routeName` is part of the ride Cyclometer recorded. Confirm in Strava's app review (#288, PRD OQ-S6); if Strava disagrees, a Strava route's `routeName` is cleared with the route |
 
 ---
 
