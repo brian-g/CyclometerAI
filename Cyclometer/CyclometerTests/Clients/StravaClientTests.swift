@@ -176,24 +176,32 @@ struct StravaClientTests {
         effortID: "2801117330", segmentID: "365235", name: "Tunnel Road",
         distanceMeters: 1826.4, averageGradePercent: 4.1, elapsedSeconds: 412, startIndex: 1110, climbCategory: 0,
         startLatitude: 37.8581, startLongitude: -122.2402, endLatitude: 37.8655, endLongitude: -122.2265,
-        prRank: 3, komRank: nil
+        prRank: 3, komRank: nil, isHidden: false
+    )
+
+    /// Marked `hidden` by Strava: passed through for S15 (#633) to decide on.
+    static let tunnelRoadUpper = StravaSegmentEffort(
+        effortID: "2801117333", segmentID: "365236", name: "Tunnel Road Upper",
+        distanceMeters: 980.2, averageGradePercent: 5.3, elapsedSeconds: 230, startIndex: 1600, climbCategory: 0,
+        startLatitude: 37.8655, startLongitude: -122.2265, endLatitude: 37.8690, endLongitude: -122.2201,
+        prRank: nil, komRank: nil, isHidden: true
     )
 
     static let grizzlyPeak = StravaSegmentEffort(
         effortID: "2801117331", segmentID: "673683", name: "Grizzly Peak Climb",
         distanceMeters: 3412.8, averageGradePercent: 6.4, elapsedSeconds: 1052, startIndex: 2280, climbCategory: 2,
         startLatitude: 37.8702, startLongitude: -122.2541, endLatitude: 37.8811, endLongitude: -122.2433,
-        prRank: 1, komRank: 7
+        prRank: 1, komRank: 7, isHidden: false
     )
 
     /// Strava's answer has no best time (`StravaLiveTests.answerShapes`), so none is decoded.
-    @Test("Segment efforts decode in ride order with PR and KOM ranks, and a segment without a location is dropped")
+    @Test("Segment efforts decode in ride order with PR and KOM ranks and Strava's hidden flag, and a segment without a location is dropped")
     func segmentEffortsDecode() async throws {
         let server = Server(["GET /api/v3/activities/9000000001": try Self.ok("strava-activity-efforts")])
 
         let efforts = try await Self.makeClient(server).segmentEfforts("9000000001")
 
-        #expect(efforts == [Self.tunnelRoad, Self.grizzlyPeak])
+        #expect(efforts == [Self.tunnelRoad, Self.tunnelRoadUpper, Self.grizzlyPeak])
 
         let url = try #require(server.requests.value.first?.url)
         #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems == [
@@ -207,7 +215,7 @@ struct StravaClientTests {
             Server.Answer(status: 200, body: try Self.fixture("strava-activity-efforts", replacing: #""elapsed_time": 1052,"#, with: "")),
         ]])
 
-        #expect(try await Self.makeClient(server).segmentEfforts("9000000001") == [Self.tunnelRoad])
+        #expect(try await Self.makeClient(server).segmentEfforts("9000000001") == [Self.tunnelRoad, Self.tunnelRoadUpper])
     }
 
     @Test("An activity with no efforts decodes as none")

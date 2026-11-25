@@ -209,6 +209,66 @@
       "average_heartrate": 151.2,
       "max_heartrate": 168.0,
       "visibility": "everyone"
+    },
+    {
+      "id": 2801117333,
+      "resource_state": 2,
+      "name": "Tunnel Road Upper",
+      "activity": {
+        "id": 9000000001,
+        "id_str": "9000000001",
+        "visibility": "everyone",
+        "resource_state": 1
+      },
+      "athlete": {
+        "id": 134815,
+        "id_str": "134815",
+        "resource_state": 1
+      },
+      "elapsed_time": 230,
+      "moving_time": 412,
+      "start_date": "2026-11-21T14:20:44Z",
+      "start_date_local": "2026-11-21T06:20:44Z",
+      "distance": 1830.0,
+      "start_index": 1600,
+      "end_index": 1830,
+      "segment": {
+        "id": 365236,
+        "resource_state": 2,
+        "name": "Tunnel Road Upper",
+        "activity_type": "Ride",
+        "distance": 980.2,
+        "average_grade": 5.3,
+        "maximum_grade": 8.0,
+        "elevation_high": 290.0,
+        "elevation_low": 215.0,
+        "start_latlng": [
+          37.8655,
+          -122.2265
+        ],
+        "end_latlng": [
+          37.869,
+          -122.2201
+        ],
+        "climb_category": 0,
+        "private": false,
+        "city": "Berkeley",
+        "state": "CA",
+        "country": "United States",
+        "hazardous": false,
+        "starred": false,
+        "elevation_profile": null,
+        "elevation_profiles": null
+      },
+      "kom_rank": null,
+      "pr_rank": null,
+      "achievements": [],
+      "hidden": true,
+      "device_watts": false,
+      "average_cadence": 82.4,
+      "average_heartrate": 151.2,
+      "max_heartrate": 168.0,
+      "visibility": "everyone"
     }
   ]
 }

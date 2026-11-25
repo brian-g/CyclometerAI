@@ -54,6 +54,9 @@ struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var prRank: Int?
     /// 1–10 on the segment's leaderboard.
     var komRank: Int?
+    /// Strava's `hidden` flag: `include_all_efforts` returns efforts that Strava's own activity page
+    /// hides. Passed through; S15 (#633) decides whether to show them.
+    var isHidden: Bool
     /// The rider's best time on the segment and its date. Strava's activity answer doesn't carry
     /// them, so `StravaClient` leaves them nil; #633 decides how they are filled.
     var bestElapsedSeconds: Int?

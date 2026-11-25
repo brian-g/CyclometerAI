@@ -76,7 +76,8 @@ enum StravaWire {
             endLatitude: end.latitude,
             endLongitude: end.longitude,
             prRank: effort.prRank,
-            komRank: effort.komRank
+            komRank: effort.komRank,
+            isHidden: effort.hidden ?? false
         )
     }
 
@@ -174,6 +175,7 @@ private extension StravaWire {
         var startIndex: Int?
         var prRank: Int?
         var komRank: Int?
+        var hidden: Bool?
         var segment: Segment
     }
 

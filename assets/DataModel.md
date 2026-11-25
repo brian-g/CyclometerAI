@@ -919,6 +919,7 @@ struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var endLongitude: Double
     var prRank: Int?                            // 1–3
     var komRank: Int?                           // 1–10
+    var isHidden: Bool                          // Strava's `hidden`: its activity page hides it; S15 (#633) decides
     var bestElapsedSeconds: Int?                // not in Strava's activity answer (#627); #633 decides how it's filled
     var bestDate: Date?
 }
