@@ -71,8 +71,18 @@ struct RideDetailList<MapHeader: View>: View {
                     .listRowSeparator(.hidden)
             }
             RideSummarySection(stats: store.stats, unit: store.unitSystem) { passes in
+                // A `Button`, not a `NavigationLink`, as it opens a sheet, so the chevron saying
+                // the row opens something is drawn here (#660), in the system indicator's style.
                 Button { store.send(.passesTapped) } label: {
-                    LabeledContent("Vehicle Passes", value: passes.formatted())
+                    LabeledContent("Vehicle Passes") {
+                        HStack {
+                            Text(passes.formatted())
+                            Image(systemName: "chevron.forward")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color.cyTextTertiary)
+                                .accessibilityHidden(true)
+                        }
+                    }
                 }
                 .tint(Color.cyTextPrimary)
                 .disabled(store.vehiclePasses.isEmpty)
