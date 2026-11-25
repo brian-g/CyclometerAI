@@ -3361,4 +3361,6 @@ Fixtures synthesized from Strava's reference (repo is public); an opt-in live te
   each counted in the log; StravaLiveTests 4 skipped (no token). With the 401 retry disabled, both 401 tests fail
   (checked, then restored). Full CyclometerTests: 3213 passed, 1 failed — `RideSummaryFeatureTests/
   finishStatsNeverStored` amid a host stall (neighbours all ~47 s); 31/31 when the suite reran alone.
-- Not verified: real Strava answers. Needs the opt-in live check with a token (Brian).
+- Live check (Brian, 2026-11-24): StravaLiveTests 5/5 against Strava. 10 routes, all type 1 / subType 1 (no run
+  routes to compare, so #634 should keep `type == 1` rather than drop a guessed run value); route detail 1 segment,
+  GPX 45,860 bytes; 2 bikes; an activity with 49 efforts, 0 PRs, 0 with a best (expected for a free account).
