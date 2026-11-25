@@ -74,6 +74,17 @@ final class RideDetailSnapshotTests: XCTestCase {
         )
     }
 
+    /// The four passes `stats(_:)` counts with a radar, spread along `points`.
+    private static func passes(_ points: [TrackPointDTO]) -> [VehiclePassEventDTO] {
+        stride(from: 200, to: points.count, by: 400).prefix(4).map { index in
+            VehiclePassEventDTO(
+                rideId: summary.id, timestamp: points[index].timestamp,
+                latitude: points[index].latitude, longitude: points[index].longitude,
+                alertLevelAtPass: .caution, riderSpeedKph: 25, estimatedPassSpeedKph: 55
+            )
+        }
+    }
+
     /// Three forecasts 10 minutes apart on the northbound `points`: the wind from the north
     /// (head), then the east (cross), then the south (tail), warming 14 to 17 °C as the humidity
     /// falls from 70 to 58 % (#151).
@@ -88,7 +99,7 @@ final class RideDetailSnapshotTests: XCTestCase {
 
     /// Imperial units, and the state `.task` would have produced seeded directly.
     private func screen(_ points: [TrackPointDTO], stats: RideStats, route: RouteSummary? = nil,
-                        drawsTrack: Bool = true) -> some View {
+                        drawsTrack: Bool = true, passes: [VehiclePassEventDTO] = []) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
@@ -100,6 +111,8 @@ final class RideDetailSnapshotTests: XCTestCase {
             state.track = RideDetailTrack(points: points, altitudeSource: .barometric)
             state.stats = stats
             state.route = route
+            // Empty leaves the Vehicle Passes row disabled, as while they load (#660).
+            state.vehiclePasses = passes
             state.updateWindExposure()
             if !stats.weather.isEmpty { state.weatherAttribution = .fixture }
             return Store(initialState: state) {
@@ -151,10 +164,12 @@ final class RideDetailSnapshotTests: XCTestCase {
     // Named for this screen — reference PNGs are flat in the test bundle.
 
     /// HR, cadence, altitude, a body mass and a paired radar: every section filled (#536), and
-    /// every finish-stats row (#460).
+    /// every finish-stats row (#460). The only case with the passes loaded, so the only one whose
+    /// Vehicle Passes row is enabled (#660).
     func testRideDetailAllSensors() {
         let points = Self.points()
-        assertBothSchemes(screen(points, stats: Self.stats(points)), named: "all-sensors")
+        assertBothSchemes(screen(points, stats: Self.stats(points), passes: Self.passes(points)),
+                          named: "all-sensors")
     }
 
     /// GPS alone, with its altitude: no Cadence or Heart Rate sections, and no cadence, HR, pass or

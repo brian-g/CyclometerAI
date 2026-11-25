@@ -72,19 +72,26 @@ struct RideDetailList<MapHeader: View>: View {
             }
             RideSummarySection(stats: store.stats, unit: store.unitSystem) { passes in
                 // A `Button`, not a `NavigationLink`, as it opens a sheet, so the chevron saying
-                // the row opens something is added here (#660). `_DisclosureIndicator` is the
-                // system's own, so it matches the Route row's and follows Increase Contrast. It is
-                // underscored: if an SDK drops it, hand-match `chevron.forward` in `.tertiary`.
+                // the row opens something is added here (#660), drawn as a link's: at the trailing
+                // edge, beside the label and value when large type stacks them, and greyed with
+                // the row while it's disabled, as a disabled link is. A foreground style rather
+                // than a tint, which a disabled row doesn't grey; the value keeps its secondary.
+                // `_DisclosureIndicator` is the system's own, so it follows Increase Contrast. It
+                // is underscored; if an SDK drops it, a hand-drawn `chevron.forward` would need
+                // matching to the Route row's again, as no fallback has been checked.
                 Button { store.send(.passesTapped) } label: {
-                    LabeledContent("Vehicle Passes") {
-                        HStack {
-                            Text(passes.formatted())
-                            _DisclosureIndicator()
-                                .accessibilityHidden(true)
+                    HStack {
+                        LabeledContent {
+                            Text(passes.formatted()).foregroundStyle(.secondary)
+                        } label: {
+                            Text("Vehicle Passes")
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        _DisclosureIndicator()
+                            .accessibilityHidden(true)
                     }
                 }
-                .tint(Color.cyTextPrimary)
+                .foregroundStyle(Color.cyTextPrimary)
                 .disabled(store.vehiclePasses.isEmpty)
             }
             RideDetailMetricSections(store: store)
