@@ -919,7 +919,8 @@ struct StravaSegmentEffort: Codable, Equatable, Sendable {
     var endLongitude: Double
     var prRank: Int?                            // 1–3
     var komRank: Int?                           // 1–10
-    var bestElapsedSeconds: Int?                // subscriber-only on Strava's side
+    var isHidden: Bool                          // Strava's `hidden`: its activity page hides it; S15 (#633) decides
+    var bestElapsedSeconds: Int?                // not in Strava's activity answer (#627); #633 decides how it's filled
     var bestDate: Date?
 }
 
@@ -929,7 +930,7 @@ struct StravaRouteSegment: Codable, Equatable, Sendable {
     var distanceMeters: Double
     var averageGradePercent: Double
     var climbCategory: Int                      // 0 = uncategorized … 5 = HC
-    var bestElapsedSeconds: Int?                // subscriber-only on Strava's side
+    var bestElapsedSeconds: Int?                // not in Strava's route answer (#627); #633/#635 decide
     var bestDate: Date?
 }
 ```

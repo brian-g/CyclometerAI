@@ -5,6 +5,7 @@
 **Updated:** 2026-11-21 - Strava (Phase 2, PRD §8.12): new §4.15 `KeychainClient`, `StravaAuthClient`, `StravaClient`, `AccountsFeature`, `SyncQueueFeature`, `StravaRoutesFeature`; S10's Sync To replaces `RideSyncSheetFeature`  
 **Updated:** 2026-09-30 - §3 and §8 rewritten to match the implemented tree (#339, #342)  
 **Updated:** 2026-10-09 - `AltimeterClient` and `LocationUpdate.verticalAccuracy` (#387)  
+**Updated:** 2026-11-24 - §4.15 `StravaClient` built (#627): `refreshAccessToken(rejected:)` on `StravaAuthClient`, `StravaError`, rate-limit reset at midnight UTC when a daily count is spent  
 **Status:** Draft — Ready for Engineering Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Companion Documents:** `PRD.md §11`, `BLE.md`, `DataModel.md`
@@ -909,6 +910,7 @@ struct KeychainClient {
 struct StravaAuthClient {
     var connect:        @Sendable () async throws -> ConnectedService    // OAuth + exchange + Keychain write + record
     var accessToken:    @Sendable () async throws -> String              // refreshes under 5 min left
+    var refreshAccessToken: @Sendable (_ rejected: String) async throws -> String  // after a 401; skipped when already replaced (#627)
     var disconnect:     @Sendable () async throws -> Void                // Keychain + record + caches, then revoke
     var handleRedirect: @MainActor @Sendable (URL) -> Bool               // the Strava app's redirect, from AppFeature.urlOpened
 }
@@ -916,7 +918,7 @@ struct StravaAuthClient {
 @DependencyClient
 struct StravaClient {
     var upload:          @Sendable (StravaUpload) async throws -> StravaUploadID
-    var uploadStatus:    @Sendable (StravaUploadID) async throws -> StravaUploadStatus   // .processing / .ready(activityID) / .duplicate(activityID) / .failed
+    var uploadStatus:    @Sendable (StravaUploadID) async throws -> StravaUploadStatus   // .processing / .ready(activityID) / .duplicate(activityID) / .failed(reason)
     var segmentEfforts:  @Sendable (_ activityID: String) async throws -> [StravaSegmentEffort]
     var routes:          @Sendable (_ page: Int) async throws -> [StravaRouteSummary]
     var route:           @Sendable (_ routeID: String) async throws -> StravaRouteDetail  // segments
@@ -931,8 +933,16 @@ struct StravaClient {
 `AppView.onOpenURL` sends `AppFeature.urlOpened`, which imports a file as before and hands any other URL to
 `handleRedirect`. The web session catches its redirect itself.
 
-`StravaClient`'s live value adds the bearer token from `StravaAuthClient`, retries once after a 401 with a refreshed
-token, reads the rate-limit headers, and throws `StravaError.rateLimited(until:)` on a 429.
+`StravaClient`'s live value (`StravaAPI`, #627) adds the bearer token from `StravaAuthClient`, and retries once
+after a 401 with `refreshAccessToken(rejected:)`. A token that is still good by the clock can be revoked, and
+concurrent 401s refresh once. It reads the `X-RateLimit-*` / `X-ReadRateLimit-*` headers (`StravaRateLimit`) and
+throws `StravaError.rateLimited(until:)` on a 429. `until` is the next midnight UTC when a daily count is spent,
+otherwise the next quarter hour; an upload counts only against the overall limit, so a spent read count doesn't hold it. Its other errors are `.unauthorized` (a 401 after the refresh), `.http(status:)`
+and `.invalidResponse`; a missing or disconnected account throws `StravaAuthError`. Uploads are multipart, the GPX
+gzipped (`gpx.gz`, `sport_type=Ride`). `StravaWire` decodes Strava's JSON into the cached models
+(DataModel.md §3.8.1). It reads no best time: Strava's activity and route answers don't carry one, whatever its
+reference shows (checked with `StravaLiveTests`). Route `type` is passed through: its values aren't
+documented, and the browser (#634) picks the rides. Reducers use `StravaClient.mock(...)`.
 
 | Feature | Scope | Does |
 |---|---|---|
@@ -1105,7 +1115,8 @@ Cyclometer/
 │   ├── Altimeter/  Audio/  BLE/  Geocoding/  Haptics/  HealthKit/  Keychain/  Location/
 │   ├── LiveActivity/  MapSnapshot/  Overpass/  Permissions/  Screen/  Weather/
 │   ├── Strava/                            // StravaAuthClient, StravaSession (actor), StravaAuthPresenter,
-│   │                                      // StravaConfig (#626)
+│   │                                      // StravaConfig (#626); StravaClient(+Mock), StravaAPI, StravaWire,
+│   │                                      // StravaModels, StravaRateLimit, StravaGzip (#627)
 │   ├── Persistence/                       // PersistenceClient, Ride/RoutePersistenceActor,
 │   │                                      // SwiftDataStack, CoreDataStack, RideDataBuffer,
 │   │                                      // TrackPointMO, CyclometerTimeSeries.xcdatamodeld
