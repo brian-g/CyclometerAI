@@ -4,6 +4,8 @@
   "resource_state" : 3,
   "firstname" : "Ada",
   "lastname" : "Lovelace",
+  "profile_medium" : "https://dgalywyr863hv.cloudfront.net/pictures/athletes/134815/0000000/1/medium.jpg",
+  "profile" : "https://dgalywyr863hv.cloudfront.net/pictures/athletes/134815/0000000/1/large.jpg",
   "city" : "San Francisco",
   "state" : "CA",
   "country" : "United States",

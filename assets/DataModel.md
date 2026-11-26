@@ -1,6 +1,7 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
+**Updated:** 2026-11-25 (#629) — §3.8 `ConnectedService` loses `accountDisplayName`: S12.1 fetches the athlete's name each time it appears. Old records still decode. No schema change.
 **Updated:** 2026-11-25 (Strava API terms, PRD §8.12 v0.6.28) — §3.8.1: Strava data is a cache of at most seven days, so a Route with a `stravaRouteID` is a cached Strava route, not an import. Its id is derived from the Strava id, `stravaSegmentsFetchedAt` is its fetch time, and it is deleted seven days after that fetch or on disconnect. Ride efforts follow the same cache. §10's cache test and OQDM11 (a Strava route's name on a ride) follow. S20's Strava segments are dropped (#637), so `Route.stravaSegmentsData` and `StravaRouteSegment` go unused; the column stays, since removing it would need a schema stage. No schema change.  
 **Previously:** 2026-11-24 (#628) — Schema 1.3 built: the Strava cache columns on `Ride` and `Route`, `SyncStatus.processing`, and `ConnectedService`, `connectedServices` and `syncDestinationDefaults` in the AppPreferences document. `SyncDestination` is stored by name, so the defaults are a JSON object and an unknown destination is dropped alone. §1, §3.1, §3.7, §3.8, §9 and OQDM7 updated.  
 **Previously:** 2026-11-21 (Strava, PRD §8.12) — §3.8 ConnectedService becomes a `Codable` value in the AppPreferences document, with Keychain `OAuthTokens`, granted scopes and S10's remembered sync defaults. New §3.8.1: segment efforts cached on `Ride`, Strava route id and segments on `Route`. §9 adds schema 1.3.  
@@ -854,11 +855,12 @@ struct ConnectedService: Codable, Equatable, Sendable, Identifiable {
     var serviceType: ExternalService
     var keychainIdentifier: String               // kSecAttrAccount of the token item
     var athleteID: String                        // Strava athlete id; the routes endpoint needs it
-    var accountDisplayName: String?              // not written: S12.1 fetches the athlete's name each time it appears (PRD §8.12)
     var grantedScopes: Set<String>               // from the OAuth callback; gates features (PRD §8.12)
     var connectedAt: Date
     var isDisconnected: Bool = false             // the service refused a refresh; S12.1 shows Not connected
 }
+// No name or photo: S12.1 fetches them each time it appears (PRD §8.12). `accountDisplayName`, written by #626's
+// build, was removed in #629; decoding ignores it in records saved before.
 
 /// Extensible without schema migration — new cases store cleanly as new string values.
 enum ExternalService: String, Codable, Sendable, CaseIterable {

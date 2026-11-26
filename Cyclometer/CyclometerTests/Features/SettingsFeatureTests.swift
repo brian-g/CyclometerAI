@@ -664,4 +664,52 @@ struct SettingsFeatureTests {
         #expect(store.state.restingOverrideText == "")
         #expect(store.state.maxOverrideText == "")
     }
+
+    // MARK: - Accounts (#629)
+
+    private static func stravaRecord(isDisconnected: Bool) -> ConnectedService {
+        ConnectedService(
+            serviceType: .strava,
+            keychainIdentifier: StravaConfig.keychainAccount,
+            athleteID: "134815",
+            grantedScopes: Set(StravaConfig.requestedScopes),
+            connectedAt: Date(timeIntervalSince1970: 1_795_996_800),
+            isDisconnected: isDisconnected
+        )
+    }
+
+    @Test("The Strava row reads Reconnect only for an account Strava revoked")
+    func stravaRowReconnect() {
+        let storage = FileStorage.inMemory
+        withDependencies {
+            $0.defaultFileStorage = storage
+        } operation: {
+            var state = SettingsFeature.State()
+            #expect(!state.stravaNeedsReconnect)
+            state.$preferences.withLock { $0.connectedServices = [Self.stravaRecord(isDisconnected: false)] }
+            #expect(!state.stravaNeedsReconnect)
+            state.$preferences.withLock { $0.connectedServices = [Self.stravaRecord(isDisconnected: true)] }
+            #expect(state.stravaNeedsReconnect)
+        }
+    }
+
+    /// S12.1 hands Disconnect up so the revoke outlives the screen it pops (#629).
+    @Test("A confirmed Disconnect pops S12.1 and disconnects", arguments: [false, true])
+    func disconnectPopsAndDisconnects(disconnectThrows: Bool) async {
+        let store = makeStore()
+        let disconnects = LockIsolated(0)
+        store.dependencies.stravaAuth.disconnect = {
+            disconnects.withValue { $0 += 1 }
+            if disconnectThrows { throw StravaAuthError.notConnected }
+        }
+
+        await store.send(.path(.push(id: 0, state: .stravaAccount(AccountsFeature.State())))) {
+            $0.path[id: 0] = .stravaAccount(AccountsFeature.State())
+        }
+        await store.send(.path(.element(id: 0, action: .stravaAccount(.delegate(.disconnectConfirmed))))) {
+            $0.path.pop(from: 0)
+        }
+        await store.finish()
+        #expect(disconnects.value == 1)
+    }
 }

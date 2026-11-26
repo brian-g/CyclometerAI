@@ -49,7 +49,8 @@ final class SettingsSnapshotTests: XCTestCase {
         isAutoDimEnabled: Bool = true,
         customCircumferenceDraft: String? = nil,
         restingOverrideDraft: String? = nil,
-        maxOverrideDraft: String? = nil
+        maxOverrideDraft: String? = nil,
+        connectedServices: [ConnectedService] = []
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -66,6 +67,7 @@ final class SettingsSnapshotTests: XCTestCase {
                 $0.wheelCircumferenceMM = wheelCircumferenceMM
                 $0.pairedSensors = pairedSensors
                 $0.isAutoDimEnabled = isAutoDimEnabled
+                $0.connectedServices = connectedServices
             }
             @Shared(.riderProfile) var riderProfile
             $riderProfile.withLock { $0 = profile }
@@ -90,9 +92,9 @@ final class SettingsSnapshotTests: XCTestCase {
                 $0.defaultFileStorage = storage
             }
         }
-        return NavigationStack {
-            SettingsView(store: store)
-        }
+        // The app's own stack, so the Accounts row's `NavigationLink(state:)` has its destination
+        // and draws as it does in the app (#629). Start Ride is hidden, as before the stack moved.
+        return SettingsNavigationStack(store: store, isStartRideHidden: true)
         // Explicit rather than ambient: a reference recorded against whatever the host
         // bundle resolved would silently encode that instead of the token.
         .tint(Color.cyPrimary)
@@ -175,9 +177,29 @@ final class SettingsSnapshotTests: XCTestCase {
     }
 
     /// The whole list at its defaults, down to About — the only reference that reaches the
-    /// Cadence Zones section (#79): the issue's default ranges, steppers on Z1–Z4, and Reset.
+    /// Cadence Zones section (#79): the issue's default ranges, steppers on Z1–Z4, and Reset —
+    /// and the Accounts section's Strava row with nothing connected (#629).
     func testSettingsFullHeight() {
         assertBothSchemes(screen(), named: "fullHeight", on: fullHeightDevice)
+    }
+
+    /// Strava revoked access (#629): the Accounts row reads "Reconnect". Full height, as Accounts
+    /// sits below the first screen.
+    func testStravaNeedsReconnect() {
+        assertBothSchemes(
+            screen(connectedServices: [
+                ConnectedService(
+                    serviceType: .strava,
+                    keychainIdentifier: StravaConfig.keychainAccount,
+                    athleteID: "134815",
+                    grantedScopes: Set(StravaConfig.requestedScopes),
+                    connectedAt: Date(timeIntervalSince1970: 1_795_996_800),
+                    isDisconnected: true
+                ),
+            ]),
+            named: "stravaNeedsReconnect",
+            on: fullHeightDevice
+        )
     }
 
     /// Auto-dim off: the Dimmed Brightness slider under its toggle is gone (#471).

@@ -54,7 +54,7 @@ extension StravaAuthClient: DependencyKey {
         handleRedirect: { _ in false }
     )
 
-    static let previewValue = testValue
+    static let previewValue: StravaAuthClient = testValue
 }
 
 extension DependencyValues {

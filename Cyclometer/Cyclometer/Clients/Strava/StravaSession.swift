@@ -107,7 +107,6 @@ actor StravaSession {
             serviceType: .strava,
             keychainIdentifier: StravaConfig.keychainAccount,
             athleteID: String(athlete.id),
-            accountDisplayName: athlete.displayName,
             grantedScopes: scopes,
             connectedAt: now()
         )
@@ -314,15 +313,8 @@ private struct TokenResponse: Decodable {
         OAuthTokens(accessToken: accessToken, refreshToken: refreshToken, expiresAt: Date(timeIntervalSince1970: expiresAt))
     }
 
+    /// Only the id is kept; the name and photo are fetched when S12.1 shows them (PRD §8.12).
     struct Athlete: Decodable {
         var id: Int64
-        var firstname: String?
-        var lastname: String?
-
-        /// The athlete's name as the rider's locale writes it; nil when Strava has none.
-        var displayName: String? {
-            let name = PersonNameComponents(givenName: firstname, familyName: lastname).formatted()
-            return name.isEmpty ? nil : name
-        }
     }
 }

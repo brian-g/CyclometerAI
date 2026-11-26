@@ -22,6 +22,8 @@ struct StravaClient: Sendable {
     var route: @Sendable (_ routeID: String) async throws -> StravaRouteDetail
     /// A route's GPX, for `GPXRouteImporter`.
     var routeGPX: @Sendable (_ routeID: String) async throws -> Data
+    /// The connected athlete's name and photo, for S12.1 each time it appears. Never stored.
+    var athlete: @Sendable () async throws -> StravaAthlete
     /// The rider's Strava bikes. Needs `profile:read_all`.
     var bikes: @Sendable () async throws -> [StravaGear]
     /// Sets an activity's gear, which an upload can't name.
@@ -47,6 +49,7 @@ extension StravaClient: DependencyKey {
         routes: { _ in throw StravaAuthError.notConnected },
         route: { _ in throw StravaAuthError.notConnected },
         routeGPX: { _ in throw StravaAuthError.notConnected },
+        athlete: { throw StravaAuthError.notConnected },
         bikes: { throw StravaAuthError.notConnected },
         setGear: { _, _ in throw StravaAuthError.notConnected }
     )

@@ -101,6 +101,28 @@ struct StravaRouteDetail: Equatable, Sendable {
     var segments: [StravaRouteSegment]
 }
 
+/// The connected athlete (`GET /athlete`), for S12.1's card. Fetched each time S12.1 appears and
+/// never stored (PRD §8.12).
+struct StravaAthlete: Equatable, Sendable {
+    /// The athlete's name as the rider's locale writes it; nil when Strava has none.
+    var name: String?
+    /// The profile photo; nil when the athlete has none and Strava answers its default avatar.
+    var photoURL: URL?
+
+    init(name: String?, photoURL: URL?) {
+        self.name = name
+        self.photoURL = photoURL
+    }
+
+    /// From Strava's name fields. Blank parts count as missing, so a name of spaces is nil.
+    init(firstName: String?, lastName: String?, photoURL: URL?) {
+        let name = PersonNameComponents(givenName: firstName, familyName: lastName)
+            .formatted()
+            .trimmingCharacters(in: .whitespaces)
+        self.init(name: name.isEmpty ? nil : name, photoURL: photoURL)
+    }
+}
+
 /// One of the rider's Strava bikes (`GET /athlete`), for gear once Multi-bike lands.
 struct StravaGear: Equatable, Sendable, Identifiable {
     var gearID: String

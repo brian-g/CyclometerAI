@@ -2,6 +2,7 @@
 **Version:** 0.8.2  
 **Date:** 2026-11-23
 
+**Updated:** 2026-11-25 — §S12 Accounts and §S12.1 built (#629): one row per supported service (Strava), after Cadence Zones; S12.1's Permissions copy.  
 **Updated:** 2026-11-25 — Strava screens checked against Design.sketch (#637). §S05.2 and §S19: routes in source tabs, **Local** then one per connected service; a Strava route is a cache, chosen or opened, never imported (PRD §8.12). §S15: the Strava Segments row opens the new §S15.1 sheet of efforts, and Synced To is one capsule per destination, replacing the row-per-destination Sync section. §S20: Strava segments dropped from Phase 2. §S12.1: drawn, and Disconnect also removes Strava routes.
 **Updated:** 2026-11-23 — §S10 includes the services to sync section.
 **Updated:** 2026-11-22 — §S20 mirrors §S15 (#570): a half-screen map header that fades and stretches with the scroll, the route's name and distance over the fade, the name moving into the toolbar; tapping the map opens a sheet with S15's Map Options (Standard or Satellite, the forecast wind layer, Plain or Grade coloring). Elevation becomes heroes (Ascent, Descent, Steepest; Max Grade leaves the Summary). Weather adds the temperature and humidity ranges and the wind shares for a ride starting now. §W10's wind map keeps 220 pt.  
@@ -1410,6 +1411,10 @@ service (its mark, its name, chevron) navigating to its account detail, then **A
 not yet connected. Strava is the first; Ride with GPS and the others follow. A disconnected account (access revoked on
 the service's side) stays listed, its row reading "Reconnect".
 
+As built (#629): one row per *supported* service, connected or not, so there is no Add account yet: just Strava,
+its mark in the label colour, its name, and a chevron to S12.1, which shows Connect or the account. The section sits
+after Cadence Zones, which Design.sketch predates, and before About.
+
 ### S12.1 — Strava Account
 
 **Phase:** Phase 2 · **Sketch:** 12.1 - Strava: not connected, 12.1 - Strava: connected
@@ -1424,7 +1429,12 @@ the service's side) stays listed, its row reading "Reconnect".
   activities"), with Reconnect to grant it
 - **Disconnect** (destructive), confirmed by an alert: "Disconnect Strava?", "Rides already uploaded stay on Strava.
   Segments and Strava routes shown in Cyclometer are removed." Disconnect revokes access and pops to S12
-- Connected footer: "Powered by Strava" mark
+- Connected footer: "Powered by Strava" mark (Strava's orange version in light mode, its white version in dark)
+- As built (#629): the Permissions lines name Strava's consent-screen labels: "Uploads need “Upload your activities”.",
+  "Segments on private rides need “View data about your private activities”." and "Private routes and segments need
+  “View data about your private routes, segments, and events”." `read` can't be unticked, and `profile:read_all`
+  serves only gear (Multi-bike), so neither is listed. A failed connect (not a cancel) shows "Couldn't Connect to
+  Strava"
 
 ### Open UX Questions
 - [x] Silent Mode override toggle: not a setting at this time.

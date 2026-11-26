@@ -7,6 +7,7 @@
 **Updated:** 2026-10-09 - `AltimeterClient` and `LocationUpdate.verticalAccuracy` (#387)  
 **Updated:** 2026-11-24 - §4.15 `StravaClient` built (#627): `refreshAccessToken(rejected:)` on `StravaAuthClient`, `StravaError`, rate-limit reset at midnight UTC when a daily count is spent  
 **Updated:** 2026-11-25 - §4.15 follows Strava's API terms (PRD §8.12 v0.6.28): `StravaRoutesFeature` caches Strava routes rather than importing them, `AppFeature` purges Strava data older than seven days, and S15's `segments` child refetches after a day and presents S15.1. S20's `segments` child and `RouteSegmentMatcher` are dropped with S20 segments (#637)  
+**Updated:** 2026-11-25 - §4.15 `AccountsFeature` built (#629): S12.1 only, pushed on `SettingsFeature.path`; S12's Strava row is Settings' own state. Disconnect is confirmed in S12.1 and run by `SettingsFeature` after the pop. `StravaClient.athlete` built  
 **Status:** Draft — Ready for Engineering Review  
 **Author:** Brian (UX Design) + Claude (Specification)  
 **Companion Documents:** `PRD.md §11`, `BLE.md`, `DataModel.md`
@@ -164,7 +165,8 @@ AppFeature                             (App/ — tab selection, ride lifecycle, 
 ├── RoutesFeature                      (S19 — list, map-as-filter, import, filter sheet)
 │   └── path: RouteDetailFeature       (S20, StackState)
 ├── SettingsFeature                    (S12)
-│   └── DeviceManagementFeature        (S11)
+│   ├── DeviceManagementFeature        (S11)
+│   └── path: AccountsFeature          (S12.1, StackState)
 ├── StartSheetFeature                  (@Presents — S05.1)
 │   └── path: RoutePickerFeature       (S05.2, pushed on the sheet's own stack)
 ├── ActiveRideFeature                  (optional — S05 dashboard; accessory is a view, not a feature)
@@ -949,7 +951,7 @@ documented, and the browser (#634) picks the rides. Reducers use `StravaClient.m
 
 | Feature | Scope | Does |
 |---|---|---|
-| `AccountsFeature` | `SettingsFeature` | S12 Accounts rows and S12.1: connect, disconnect, granted scopes. S12.1's `.task` fetches `athlete` each time it appears, for the name and photo, and stores neither: the photo loads through a session with no URL cache, so it never reaches the disk; a disconnected account shows as not connected |
+| `AccountsFeature` | `SettingsFeature` | S12 Accounts rows and S12.1: connect, disconnect, granted scopes. S12.1's `.task` fetches `athlete` each time it appears, for the name and photo, and stores neither: the photo loads through a session with no URL cache, so it never reaches the disk; a disconnected account shows as not connected. **As built (#629):** S12.1 alone, pushed on `SettingsFeature.path` (`NavigationLink(state:)`); the Strava row reads `SettingsFeature.State.stravaNeedsReconnect`. Connect and Reconnect are one `stravaAuth.connect()`. Disconnect is confirmed in S12.1, which sends `delegate(.disconnectConfirmed)`; `SettingsFeature` pops it and runs `stravaAuth.disconnect()`, since the client removes the record before its revoke answers and the revoke must outlive the screen. The photo loads through `AsyncImage` with `asyncImageURLSession` on an ephemeral session with no `urlCache` |
 | `SyncQueueFeature` | `AppFeature` (app-lifetime) | Runs uploads after S10 closes: upload, poll `uploadStatus` (1, 2, 4, then 8 s, for 2 min), write `RideSyncRecord`. On launch resumes records left `pending` or `processing`. Replaces `SyncClient.uploadRide`'s single call |
 | `RideSummaryFeature` | — | Gains `syncDestinations: [SyncDestination: Bool]` for S10's Sync To; `.task` loads the defaults; `.finishTapped` and dismissal save them and send the chosen services to `SyncQueueFeature`. Health is a destination like the services: on, the close sets `isHealthWorkoutOwed` and writes the workout; off, it clears the flag and nothing is written. No write at save. `RideSyncSheetFeature` is retired |
 | `StravaRoutesFeature` | S19 and S05.2 | Paged list of the rider's Strava routes, refetched when shown and more than a day old. A cached route is deleted as gone from Strava only when its own fetch answers 404, or when the list has been read to its last page without it: the list is paged, so a route missing from a partial read stays. Opening or choosing one fetches `routeGPX`, parses and analyses through `GPXRouteImporter` without the surface lookup or narrative, and writes a cached Strava route row under its derived id (DataModel.md §3.8.1). Nothing is imported into the library |
@@ -1116,7 +1118,7 @@ Cyclometer/
 │   ├── Routes/                            // RoutesFeature/View, RouteDetail*, RouteFilter,
 │   │                                      // RouteLibrary, RoutesMapCamera, RouteWindFeature
 │   │                                      // (#561, also scoped by RideWeatherFeature)
-│   ├── Settings/                          // SettingsFeature/View, DeviceManagement*
+│   ├── Settings/                          // SettingsFeature/View, DeviceManagement*, Accounts* (S12.1)
 │   └── Onboarding/                        // Onboarding*, Welcome*, SensorPairing*
 │
 ├── Clients/                               // one folder per dependency client

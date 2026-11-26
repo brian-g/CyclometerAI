@@ -167,7 +167,6 @@ struct AppPreferencesTests {
         serviceType: .strava,
         keychainIdentifier: "strava",
         athleteID: "12345",
-        accountDisplayName: "Ada Lovelace",
         grantedScopes: ["read", "activity:write"],
         connectedAt: Date(timeIntervalSince1970: 1_800_000_000),
         isDisconnected: true
@@ -206,6 +205,16 @@ struct AppPreferencesTests {
         let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
         #expect(decoded.connectedServices.map(\.serviceType) == [.strava])
         #expect(decoded.wheelCircumferenceMM == 2136)
+    }
+
+    /// Records saved before #629 carry the athlete's name, which is no longer kept (PRD §8.12). The
+    /// account must survive it: a record that failed to decode would silently disconnect the rider.
+    @Test("A record saved with the athlete's name still decodes")
+    func recordWithStoredNameDecodes() throws {
+        let strava = #"{"serviceType":"strava","keychainIdentifier":"strava","athleteID":"12345","accountDisplayName":"Ada Lovelace","grantedScopes":["read"],"connectedAt":0,"isDisconnected":false}"#
+        let json = Data(#"{"wheelCircumferenceMM":2136,"connectedServices":[\#(strava)]}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppPreferences.self, from: json)
+        #expect(decoded.connectedServices.map(\.athleteID) == ["12345"])
     }
 
     /// `imagery`, offered while #537 was built and then dropped, or a basemap from a newer build.

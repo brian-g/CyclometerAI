@@ -295,6 +295,38 @@ struct StravaClientTests {
         #expect(try await Self.makeClient(server).routeGPX("3344024577052366532") == gpx)
     }
 
+    // MARK: - Athlete
+
+    @Test("The athlete's name and photo decode")
+    func athleteDecodes() async throws {
+        let server = Server(["GET /api/v3/athlete": try Self.ok("strava-athlete")])
+
+        let athlete = try await Self.makeClient(server).athlete()
+
+        #expect(athlete.name == "Ada Lovelace")
+        #expect(athlete.photoURL == URL(string: "https://dgalywyr863hv.cloudfront.net/pictures/athletes/134815/0000000/1/large.jpg"))
+    }
+
+    /// Strava's answer for an athlete without a photo: a relative path to its default avatar.
+    @Test("Strava's default avatar is no photo")
+    func defaultAvatarIsNoPhoto() async throws {
+        let body = try Self.fixture(
+            "strava-athlete",
+            replacing: #""profile" : "https://dgalywyr863hv.cloudfront.net/pictures/athletes/134815/0000000/1/large.jpg""#,
+            with: #""profile" : "avatar/athlete/large.png""#
+        )
+        let server = Server(["GET /api/v3/athlete": [Server.Answer(status: 200, body: body)]])
+
+        #expect(try await Self.makeClient(server).athlete().photoURL == nil)
+    }
+
+    @Test("An athlete without a name has none, rather than an empty one")
+    func athleteWithoutName() {
+        #expect(StravaAthlete(firstName: nil, lastName: nil, photoURL: nil).name == nil)
+        #expect(StravaAthlete(firstName: " ", lastName: "", photoURL: nil).name == nil)
+        #expect(StravaAthlete(firstName: "Ada", lastName: nil, photoURL: nil).name == "Ada")
+    }
+
     // MARK: - Gear
 
     @Test("The athlete's bikes decode, and shoes are left out")

@@ -65,7 +65,6 @@ struct StravaSessionTests {
         serviceType: .strava,
         keychainIdentifier: account,
         athleteID: "12345",
-        accountDisplayName: "Ada Lovelace",
         grantedScopes: ["read", "activity:write"],
         connectedAt: now.addingTimeInterval(-86_400)
     )
@@ -279,7 +278,6 @@ struct StravaSessionTests {
             serviceType: .strava,
             keychainIdentifier: Self.account,
             athleteID: "12345",
-            accountDisplayName: "Ada Lovelace",
             grantedScopes: ["read", "activity:write"],
             connectedAt: Self.now
         ))

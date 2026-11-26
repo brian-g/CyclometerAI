@@ -1,5 +1,9 @@
 import ComposableArchitecture
 import UIKit
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
+private let logger = Logger.cyclometer(.accounts)
 
 /// What the wheel-size picker is showing: one of the PRD §8.9 presets, or a
 /// manually entered circumference.
@@ -16,6 +20,7 @@ struct SettingsFeature {
     @Dependency(\.openURL) var openURL
     @Dependency(\.date) var date
     @Dependency(\.screenClient) var screenClient
+    @Dependency(\.stravaAuth) var stravaAuth
 
     private enum CancelID { case dimPreview }
 
@@ -47,6 +52,9 @@ struct SettingsFeature {
         /// S11 subset, pushed from the Sensors row. Non-optional like AppFeature's
         /// tab children — its effects only run while the screen's `.task` is alive.
         var deviceManagement = DeviceManagementFeature.State()
+        /// Settings' navigation stack: S12.1, pushed from the Accounts row (#629). Reducer state, so
+        /// Disconnect can pop it.
+        var path = StackState<Path.State>()
         /// In-progress manual entry. `nil` means the rider is not editing, so the
         /// field shows the persisted value — which is why no lifecycle action is
         /// needed to seed it, and why reverting a bad entry is just clearing this.
@@ -92,6 +100,15 @@ struct SettingsFeature {
         var isPlaceNameLookupEnabled: Bool { preferences.isPlaceNameLookupEnabled }
         /// Read by `LiveActivityFeature` (#313).
         var isLiveActivityEnabled: Bool { preferences.isLiveActivityEnabled }
+
+        /// S12.1 for the Accounts row to push.
+        var stravaAccount: Path.State { .stravaAccount(AccountsFeature.State()) }
+
+        /// Strava refused a refresh or the Keychain item is missing: the Accounts row reads
+        /// "Reconnect" (UX §S12).
+        var stravaNeedsReconnect: Bool {
+            preferences.connectedServices.first { $0.serviceType == .strava }?.isDisconnected ?? false
+        }
 
         /// Deduped by peripheral (`AppPreferences.pairedRoles`), so a combo
         /// speed+cadence sensor counts once rather than twice.
@@ -219,6 +236,7 @@ struct SettingsFeature {
         case maxOverrideChanged(String)
         case maxOverrideCommitted
         case deviceManagement(DeviceManagementFeature.Action)
+        case path(StackActionOf<Path>)
         case delegate(Delegate)
 
         @CasePathable
@@ -391,10 +409,30 @@ struct SettingsFeature {
                 state.$riderProfile.withLock { $0 = updated }
                 state.maxOverrideDraft = nil
                 return .none
-            case .deviceManagement, .delegate:
+            case let .path(.element(id: id, action: .stravaAccount(.delegate(.disconnectConfirmed)))):
+                // Pops first, and disconnects here rather than in S12.1, whose effects end with it:
+                // the revoke is a network call, and the account is gone before it answers.
+                state.path.pop(from: id)
+                return .run { [stravaAuth] _ in
+                    do {
+                        try await stravaAuth.disconnect()
+                    } catch {
+                        // The client runs every step whatever fails, so the record and token are
+                        // gone; only a cache that failed to clear is left behind.
+                        logger.error("Strava disconnect: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
+            case .deviceManagement, .path, .delegate:
                 return .none
             }
         }
+        .forEach(\.path, action: \.path)
+    }
+
+    /// What Settings can push (#629). `Equatable` in extensions below, as TCA asks.
+    @Reducer
+    enum Path {
+        case stravaAccount(AccountsFeature)
     }
 
     /// Single funnel for every circumference change — persisting and pushing to
@@ -415,3 +453,6 @@ struct SettingsFeature {
         }
     }
 }
+
+extension SettingsFeature.Path.State: Equatable {}
+extension SettingsFeature.Path.Action: Equatable {}
