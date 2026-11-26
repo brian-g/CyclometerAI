@@ -130,7 +130,8 @@ private struct AthletePhoto: View {
             }
         }
         .asyncImageURLSession(Self.session)
-        .clipShape(.rect)
+        // A circle for every athlete. Strava draws subscribers in a shield, which isn't copied.
+        .clipShape(.circle)
         .accessibilityHidden(true)
     }
 

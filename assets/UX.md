@@ -1422,7 +1422,7 @@ after Cadence Zones, which Design.sketch predates, and before About.
 - Not connected: Strava's "Connect with Strava" button (Strava's own asset, unaltered), alone. No explanation and no
   footer: the button already says what it is and whose it is
 - Disconnected by Strava (access revoked on strava.com): the same as Not connected
-- Connected: the athlete's name and profile photo, fetched from Strava each time S12.1 appears and never stored (PRD
+- Connected: the athlete's name and profile photo (a circle for every athlete; Strava's subscriber shield isn't copied), fetched from Strava each time S12.1 appears and never stored (PRD
   §8.12). Until they arrive, or offline, the card shows the photo's placeholder and "Strava". Then the
   "Connected since" date (kept when Reconnect re-grants a scope on the same live account; a new athlete, or an account
   Strava revoked, starts again), and a **Permissions** section

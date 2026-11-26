@@ -3417,3 +3417,5 @@ can pop.
   - Tests: 4 new session tests, 115/115 over 5 iterations. Each ordering test fails with its fix removed (checked,
     then restored).
   - Open: the photo shape (Strava draws subscribers in a shield and free athletes in a circle).
+- Photo shape (Brian, 2026-11-26): a circle for every athlete; Strava's subscriber shield isn't copied. Brian checked
+  it on device. The 6 connected references were re-recorded; StravaAccountSnapshotTests and AccountsFeatureTests pass.
