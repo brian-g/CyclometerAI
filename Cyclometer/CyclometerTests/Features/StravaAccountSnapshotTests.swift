@@ -68,6 +68,10 @@ final class StravaAccountSnapshotTests: XCTestCase {
             AccountsView(store: store)
         }
         .tint(Color.cyPrimary)
+        // "Connected since" is a date, and `connectedAt` is midnight UTC: unpinned, a machine east
+        // of UTC (or a runner on UTC) records the next day. Chicago, as the other date-bearing suites.
+        .environment(\.locale, Locale(identifier: "en_US"))
+        .environment(\.timeZone, TimeZone(identifier: "America/Chicago")!)
     }
 
     private func assertBothSchemes(

@@ -3,8 +3,10 @@ import ComposableArchitecture
 
 /// S12.1 Strava Account (UX.md §S12.1, Design.sketch "12.1 - Strava"), #629.
 ///
-/// Strava's marks are its own unaltered assets (`Assets.xcassets/strava`), and Strava orange
-/// appears only inside them (PRD §8.12 branding).
+/// Strava's Connect button and "Powered by Strava" mark are its own unaltered assets
+/// (`Assets.xcassets/strava`), and Strava orange appears only inside them (PRD §8.12 branding).
+/// S12's row mark, in the same folder, is a template glyph drawn in the label colour, not one of
+/// Strava's downloads.
 struct AccountsView: View {
     @Bindable var store: StoreOf<AccountsFeature>
 
@@ -84,6 +86,10 @@ private struct AthleteCard: View {
 
     /// Design.sketch "12.1 - Strava: connected".
     @ScaledMetric(relativeTo: .title2) private var photoSide: CGFloat = 64
+    /// The environment's rather than the process's, so a snapshot can pin the date
+    /// (`ETAWidgetView`'s pattern). `Date.formatted()` alone ignores both.
+    @Environment(\.locale) private var locale
+    @Environment(\.timeZone) private var timeZone
 
     var body: some View {
         HStack(spacing: Spacing.md) {
@@ -94,7 +100,7 @@ private struct AthleteCard: View {
                 Text(athlete?.name ?? "Strava")
                     .font(.title2)
                     .foregroundStyle(Color.cyTextPrimary)
-                Text("Connected since: \(connectedAt.formatted(date: .numeric, time: .omitted))")
+                Text("Connected since: \(connectedAt.formatted(Date.FormatStyle(date: .numeric, time: .omitted, locale: locale, timeZone: timeZone)))")
                     .font(.caption)
                     .foregroundStyle(Color.cyTextSecondary)
             }

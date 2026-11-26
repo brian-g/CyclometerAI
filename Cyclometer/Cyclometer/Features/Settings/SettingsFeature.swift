@@ -417,8 +417,9 @@ struct SettingsFeature {
                     do {
                         try await stravaAuth.disconnect()
                     } catch {
-                        // The client runs every step whatever fails, so the record and token are
-                        // gone; only a cache that failed to clear is left behind.
+                        // The client runs every step whatever fails, so the record is gone. What
+                        // can be left is a Keychain item whose delete failed, or Strava data that
+                        // failed to clear.
                         logger.error("Strava disconnect: \(error.localizedDescription, privacy: .public)")
                     }
                 }
