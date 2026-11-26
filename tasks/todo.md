@@ -3407,3 +3407,13 @@ can pop.
   or 8 of 31 before `finish` returns); it also failed 2 of 5 iterations with the touched suites, and it's untouched here.
 - Touched suites × 5 iterations: SettingsFeatureTests 215/215, StravaClientTests 155/155, StravaSessionTests 95/95,
   AppPreferencesTests 145/145.
+- Code review (/code-review, xhigh): 8 findings.
+  - Fixed: the snapshot date (pinned locale and time zone; suite skipped in CI), two comments, and DataModel.md's header.
+  - Fixed after Brian's call:
+    - A connect's code exchange waits out a disconnect in flight, since Strava's deauthorize revokes every token for
+      the athlete.
+    - Once Strava redirects back, the exchange runs in an unstructured task, so leaving S12.1 can't lose the sign-in.
+    - Reconnecting the same live account keeps "Connected since".
+  - Tests: 4 new session tests, 115/115 over 5 iterations. Each ordering test fails with its fix removed (checked,
+    then restored).
+  - Open: the photo shape (Strava draws subscribers in a shield and free athletes in a circle).

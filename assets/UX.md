@@ -1424,7 +1424,8 @@ after Cadence Zones, which Design.sketch predates, and before About.
 - Disconnected by Strava (access revoked on strava.com): the same as Not connected
 - Connected: the athlete's name and profile photo, fetched from Strava each time S12.1 appears and never stored (PRD
   §8.12). Until they arrive, or offline, the card shows the photo's placeholder and "Strava". Then the
-  "Connected since" date, and a **Permissions** section
+  "Connected since" date (kept when Reconnect re-grants a scope on the same live account; a new athlete, or an account
+  Strava revoked, starts again), and a **Permissions** section
   naming anything the rider unticked on Strava's consent screen with what it turns off ("Uploads need Upload
   activities"), with Reconnect to grant it
 - **Disconnect** (destructive), confirmed by an alert: "Disconnect Strava?", "Rides already uploaded stay on Strava.
