@@ -2,6 +2,7 @@
 **Version:** 0.8.2  
 **Date:** 2026-11-23
 
+**Updated:** 2026-11-27 — §S10 Sync To built (#631): capsules between Notes and Summary, as Design.sketch's Sync Options frame draws them; a disconnected service reconnects in place rather than opening S12.1; never chosen, Apple Health starts on and a service off. The Locked state waits for #667.  
 **Updated:** 2026-11-25 — §S12 Accounts and §S12.1 built (#629): one row per supported service (Strava), after Cadence Zones; S12.1's Permissions copy.  
 **Updated:** 2026-11-25 — Strava screens checked against Design.sketch (#637). §S05.2 and §S19: routes in source tabs, **Local** then one per connected service; a Strava route is a cache, chosen or opened, never imported (PRD §8.12). §S15: the Strava Segments row opens the new §S15.1 sheet of efforts, and Synced To is one capsule per destination, replacing the row-per-destination Sync section. §S20: Strava segments dropped from Phase 2. §S12.1: drawn, and Disconnect also removes Strava routes.
 **Updated:** 2026-11-23 — §S10 includes the services to sync section.
@@ -1175,7 +1176,7 @@ The visual dashboard is otherwise unchanged — all metric widgets continue disp
 ### Layout
 > *Refer to `assets/design/Design.sketch` — S10.*
 
-A full-height sheet titled **Finish Ride**, presented when the rider confirms Finish (#249). The ride is already saved by then; the sheet waits for that save to land before showing numbers, and shows a progress row until it does. The frame's Description row is the **Notes** field (#645). Its Bike and Sync To rows are not built — there is no bike model, and sync is Phase 2.
+A full-height sheet titled **Finish Ride**, presented when the rider confirms Finish (#249). The ride is already saved by then; the sheet waits for that save to land before showing numbers, and shows a progress row until it does. The frame's Description row is the **Notes** field (#645). Its Bike row is not built — there is no bike model. Sync To is (#631).
 
 ### Key Components
 - Map (full route trace in `brPrimary`; placeholder in Design.sketch). A live map, not S14's cached image (#177)
@@ -1194,14 +1195,15 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 
 > **Revised 2026-11-23.** Design.sketch — S10 - Ride Summary Sync Options draws Sync To as a section of the summary, not a sheet behind a Sync button, and the Sketch frame wins. The rider picks the ride's destinations there, and nothing waits on a Sync tap.
 
-- One toggle capsule per connected service (Apple Health first) and **Apple Health**: the destination's mark, and its name. A service whose account is disconnected shows a "􁅥" opening its S12.1. With no service connected the section is Apple Health alone.
-- Each toggle defaults to the rider's last choice for that destination, remembered in AppPreferences; Apple Health defaults on
+- One toggle capsule for **Apple Health**, first, then one per service with an account: the destination's mark, and its name. With no service connected the section is Apple Health alone. On the page, not in a card, between Notes and Summary; one row, or one capsule per line when they don't fit
+- A service whose account is disconnected shows a "􁅥" (`point.3.filled.connected.trianglepath.dotted`) in place of its mark, drawn unselected. Tapping it reconnects in place, the same sign-in as S12.1's Reconnect, and selects it for this ride (#631). Until then it isn't sent, and its remembered choice is kept
+- Each toggle defaults to the rider's last choice for that destination, remembered in AppPreferences when S10 closes. Never chosen, Apple Health is on and a service is off: nothing uploads without the rider's choice (PRD §8.12)
 - A selected capsule is `primaryDark` for every destination, with `textOnPrimary` for its symbol and name (Brian, #637). Not each service's brand color: Strava's brand guidelines keep Strava orange to Strava's own marks (PRD §8.12)
-- Each capsule should use a symbol before the name of the service. Apple Health: figure.run, Strava: cyclometer.brands.strava-icon, Ride with GPS: cyclometer.brands.ride-with-gps-icon, Trailforks: tbd, Tribos studio: tbd
+- Each capsule should use a symbol before the name of the service. Apple Health: figure.run, Strava: cyclometer.brands.strava-icon, Ride with GPS: cyclometer.brands.ride-with-gps-icon, Trailforks: tbd, Tribos studio: tbd. Built (#631): Strava uses the `stravaMark` template asset until `cyclometer.brands.strava-icon` exists
 - **Strava** uploads when S10 closes, by Finish Ride or a swipe, so the name and description edited above go with it. The upload runs in the app, not the sheet: closing S10 never cancels it
 - **Apple Health** is written when S10 closes, with the services, and only when its row is on (below). Not automatic: once a ride can also go to Strava, an automatic Health write duplicates it — Strava's app imports Health workouts, so the ride could land on Strava twice, and Strava's own workout could come back into Fitness beside this one. Health is a destination the rider picks, like any service
 - Progress and failures are on the ride's S15 Synced To row and S14's Sync swipe, not here: S10 is gone by the time an upload finishes
-- **Locked** (assets/Monetization.md §4, §5): with the trial over and no Lifetime Unlock, Apple Health and every service row show a lock icon in place of the toggle, and nothing is written or uploaded. Tapping a locked row opens the paywall with that row's headline ("Save rides to Apple Health", "Send rides to Strava and more"). The rows read `EntitlementsClient`, never dates or StoreKit
+- **Locked** (assets/Monetization.md §4, §5; not built: #667): with the trial over and no Lifetime Unlock, Apple Health and every service row show a lock icon in place of the toggle, and nothing is written or uploaded. Tapping a locked row opens the paywall with that row's headline ("Save rides to Apple Health", "Send rides to Strava and more"). The rows read `EntitlementsClient`, never dates or StoreKit
 
 The sheet specified before this revision, kept for its row details:
 
@@ -1219,7 +1221,7 @@ The sheet specified before this revision, kept for its row details:
 An outdoor cycling `HKWorkout` is written to Apple Health when S10 closes with its Apple Health row on. The summary never waits on it — a failed write never costs the ride or the summary. The ride then appears in the iOS Fitness app.
 
 - **The choice survives a kill.** `finalizeRide` marks the ride owed a workout (`isHealthWorkoutOwed`) when the rider's remembered Apple Health choice is on, so a ride whose app is killed before S10 closes follows that choice. Closing S10 sets or clears it from the row as left
-- **Retried until it lands** (#277): a write the rider chose that fails, or never ran because the app was killed or the ride was closed out at the next launch, is retried after the next Finish, and at the next launch unless that launch resumes an unfinished ride. A skipped duplicate counts as done. Without Workouts share access, nothing is attempted: rides wait and are written once it is allowed. A ride closed out as an orphan (a new ride was started before the unfinished one was found) that the rider never ended gets no workout, since its end time is the relaunch. An orphan the rider had already ended keeps its real end time and export, so it gets its workout like any other ride (#584)
+- **Retried until it lands** (#277): a write the rider chose that fails, or never ran because the app was killed or the ride was closed out at the next launch, is retried when the next S10 closes, and at the next launch unless that launch resumes an unfinished ride. A skipped duplicate counts as done. Without Workouts share access, nothing is attempted: rides wait and are written once it is allowed. A ride closed out as an orphan (a new ride was started before the unfinished one was found) that the rider never ended gets no workout, since its end time is the relaunch. An orphan the rider had already ended keeps its real end time and export, so it gets its workout like any other ride (#584)
 
 - **Deleted with the ride** (#452), from S10 or §S14: the workout and the distance, energy and route samples written with it. It waits for any write of the same workout still in flight, and goes before the ride does, so a Health delete that fails leaves the ride in the list to delete again. Each type is deleted only where the app still has share access: without it nothing of that type was written, or the app can no longer remove it
 

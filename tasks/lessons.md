@@ -1077,3 +1077,19 @@ moment the design moves, and here contradicted the design before it was finished
 **Rule.** In the PRD, write what the product must do and why (which screens have it, what the rider must be able to
 tell, what data and rules apply), and point to UX.md for how it looks. No sections, tabs, lists, rows, placement or
 markings in the PRD. Layout goes in UX.md, following Design.sketch.
+
+---
+
+## A default that sends data out is a consent question (2026-11-27, #631)
+
+**What happened.** #631 said Sync To's defaults were "first ride on", and I applied that to every destination.
+The review caught that a rider who connects Strava and swipes S10 away uploads a ride they never chose to send.
+Brian: services off, only Apple Health on.
+
+**Why I missed it.** The spec agent had flagged the gap (no doc said what an unchosen *service* defaults to), and
+PRD §8.12 says "Nothing uploads without the rider's choice", with OQ-S1 resolved against automatic uploads. I took
+the issue's shorthand over the PRD's rule without naming the conflict.
+
+**Rule.** When a default makes data leave the device (an upload, a share, a write to another app), check it against
+the PRD's consent rules before choosing it, and raise any conflict in planning. Defaulting to "off" for an outward
+action is the safe reading of shorthand like "first ride on".

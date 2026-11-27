@@ -2204,7 +2204,7 @@ struct ActiveRideFeatureStateMachineTests {
                 currentCoordinate: { nil }
             )
             $0.persistenceClient = .mock(
-                onFinalizeRide: { finalizedRide.setValue(($0, $1, $2, $3)) }
+                onFinalizeRide: { id, endedAt, summary, url, _ in finalizedRide.setValue((id, endedAt, summary, url)) }
             )
         }
         await store.send(.finishTapped) {
@@ -2273,7 +2273,7 @@ struct ActiveRideFeatureStateMachineTests {
     ) async -> RideSummaryUpdate? {
         let finalized = LockIsolated<RideSummaryUpdate?>(nil)
         var persistenceClient = PersistenceClient.mock(
-            onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) },
+            onFinalizeRide: { _, _, summary, _, _ in finalized.setValue(summary) },
             onSaveRideFinishStats: { id, _ in backfilled.withValue { $0.append(id) } }
         )
         persistenceClient.fetchRidesOwedFinishStats = {
@@ -4802,7 +4802,7 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
     @Test("A ride that never had a radar paired finalizes with a nil vehiclePassCount")
     func noRadarFinalizesNil() async {
         let finalized = LockIsolated<RideSummaryUpdate?>(nil)
-        let store = makeStore(persistenceClient: .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) }))
+        let store = makeStore(persistenceClient: .mock(onFinalizeRide: { _, _, summary, _, _ in finalized.setValue(summary) }))
 
         await endRide(store)
         await expectEventually { finalized.value != nil }
@@ -4815,7 +4815,7 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
     @Test("A ride with a radar paired and no passes finalizes with 0")
     func radarWithoutPassesFinalizesZero() async {
         let finalized = LockIsolated<RideSummaryUpdate?>(nil)
-        let store = makeStore(persistenceClient: .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) }))
+        let store = makeStore(persistenceClient: .mock(onFinalizeRide: { _, _, summary, _, _ in finalized.setValue(summary) }))
 
         await store.send(.radarConnectionChanged(.active))
         // Losing the radar afterwards doesn't un-measure the ride.
@@ -4861,7 +4861,7 @@ struct ActiveRideFeatureVehiclePassPersistenceTests {
         resumed.coordinate = Self.coordinate
         let store = makeStore(
             initialState: resumed,
-            persistenceClient: .mock(onFinalizeRide: { _, _, summary, _ in finalized.setValue(summary) })
+            persistenceClient: .mock(onFinalizeRide: { _, _, summary, _, _ in finalized.setValue(summary) })
         )
 
         await endRide(store)

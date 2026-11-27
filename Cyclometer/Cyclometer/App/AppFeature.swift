@@ -337,40 +337,55 @@ struct AppFeature {
 
             case .rideSummary(.dismiss):
                 // The Finish Ride button and a swipe-down both land here, with the child's
-                // state still present — TCA runs this reducer before it nils it. The rename and
-                // the notes (#645) are written from here rather than from the child, whose
-                // effects are cancelled as it is dismissed.
+                // state still present — TCA runs this reducer before it nils it. The rename, the
+                // notes (#645) and Sync To (#631) are done from here rather than from the child,
+                // whose effects are cancelled as it is dismissed. So is everything they start:
+                // closing S10 never cancels an upload.
                 guard let summary = state.rideSummary else { return .none }
                 let title = summary.titleToSave
                 let notes = summary.notesToSave
-                guard title != nil || notes != nil else { return .none }
                 let id = summary.rideId
-                return .run { [persistenceClient] send in
-                    // The notes first, as S15's Edit saves them: a rename must reach S14 and the
-                    // GPX, so it goes last. Neither failure stops the other: the notes aren't in
-                    // the GPX or on S14.
-                    if let notes {
-                        // Logged in RidePersistenceActor. The ride keeps its old notes.
-                        try? await persistenceClient.updateRideNotes(id, notes)
+                let choices = summary.syncChoices
+                // Remembered for the next ride at once, before the ride's finalize can land and
+                // read Apple Health's (`ActiveRideFeature`). A service S10 didn't offer keeps its own.
+                summary.$preferences.withLock {
+                    $0.syncDestinationDefaults.merge(choices) { _, chosen in chosen }
+                }
+                let sendsToHealth = choices[.appleHealth] ?? false
+                let sendsToStrava = choices[.service(.strava)] ?? false
+                let isLoaded = summary.load == .loaded
+                return .run { [persistenceClient, clock] send in
+                    // Only a finalized ride is sent anywhere, and S10 can close before its finalize
+                    // lands. One that never does is closed out at next launch, owed its workout as
+                    // the choice just remembered says, and isn't uploaded.
+                    var isFinalized = isLoaded
+                    if !isFinalized {
+                        isFinalized = (try? await RidesFeature.awaitFinalized(id, persistenceClient: persistenceClient, clock: clock)) != nil
                     }
-                    guard let title else { return }
+                    // After the finalize, whose GPX export names an unnamed ride (`titleForExport`):
+                    // a name saved before it can be overwritten by the default, or miss the file.
+                    // Saved whether or not the finalize lands.
+                    await Self.saveNameAndNotes(id, title: title, notes: notes, persistenceClient: persistenceClient, send: send)
+                    guard isFinalized else { return }
+                    // After the name and notes: the upload reads them from the ride as it starts.
+                    if sendsToStrava {
+                        await send(.syncQueue(.enqueue(rideId: id)))
+                    }
                     do {
-                        try await persistenceClient.renameRide(id, title)
+                        try await persistenceClient.setHealthWorkoutOwed(id, sendsToHealth)
                     } catch {
-                        // Logged in RidePersistenceActor. The ride keeps its old title.
+                        // Logged in RidePersistenceActor. The ride stays as its finalize left it,
+                        // so it isn't written here against the rider's row.
                         return
                     }
-                    // S14 read the ride under its old name. Reloaded before the rewrite below,
-                    // which reads the whole track back, so the new name shows at once.
-                    await send(.rides(.reloadRides))
-                    // The GPX was written at ride end, under the old name (#286). A failed
-                    // rewrite leaves that file as it was; the rename stands either way.
-                    do {
-                        try await GPXExporter.rewrite(rideId: id)
-                    } catch {
-                        logger.error("Rewriting the GPX of renamed ride \(id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
-                    }
+                    // Writes this ride's workout if it's owed one, and retries any older ride's
+                    // that failed (#277).
+                    await RideHealthWorkout.backfill()
                 }
+
+            case .rideSummary(.presented(.delegate(.serviceConnected))):
+                // A Reconnect from Sync To (#631) sends what was waiting on Strava, as S12.1's does.
+                return .send(.syncQueue(.resume))
 
             case .rideSummary(.presented(.delegate(.deleteRide))):
                 // A plain nil rather than `.dismiss`, so the rename above never runs for a ride
@@ -406,8 +421,9 @@ struct AppFeature {
                     return .run { [persistenceClient, rideEndIntentClient, date] send in
                         // One the rider had ended keeps its end and its export (#357): closed with
                         // nil, the export is unreferenced and the launch sweep deletes it (#346).
-                        // Its end is when the rider stopped, so it stays owed its Apple Health
-                        // workout, as on the main close-out path (#584).
+                        // Its end is when the rider stopped, so it's owed its Apple Health workout
+                        // when the remembered Sync To choice says so, as on the main close-out
+                        // path (#584, #631).
                         if let pendingEnd {
                             try? await Self.finalizeEndedRide(
                                 pendingEnd, summary, persistenceClient, rideEndIntentClient
@@ -415,8 +431,8 @@ struct AppFeature {
                         } else {
                             // No workout (#277): without a marker its end is the relaunch, not when
                             // the rider stopped, so a workout would span every hour between the two.
-                            // Never owed in the same write: the new ride's Finish backfill can read
-                            // the owed list at any moment (#606).
+                            // Never owed in the same write: the new ride's S10 closing can read the
+                            // owed list at any moment (#606, #631).
                             try? await persistenceClient.finalizeRideWithoutWorkout(
                                 summary.rideId, date.now, summary
                             )
@@ -623,17 +639,8 @@ struct AppFeature {
             case .settings(.delegate(.stravaConnected)):
                 // A connect, or a Reconnect that granted the upload scope, sends what was waiting on
                 // it (#630); `resume` holds without the scope. Uploads waiting on Strava stay pending
-                // until then (PRD §8.12).
+                // until then (PRD §8.12). S10's Sync To Reconnect does the same (#631).
                 return .send(.syncQueue(.resume))
-
-            #if DEBUG
-            case .settings(.delegate(.debugUploadLatestRide)):
-                // #631 replaces this with S10's Sync To.
-                return .run { [persistenceClient] send in
-                    guard let latest = try? await persistenceClient.fetchRides().first else { return }
-                    await send(.syncQueue(.enqueue(rideId: latest.id)))
-                }
-            #endif
 
             case .rides, .routes, .settings, .syncQueue, .activeRide, .onboarding:
                 return .none
@@ -791,6 +798,35 @@ struct AppFeature {
         _ = await (workouts, finishStats)
     }
 
+    /// S10's name and notes as the sheet closed (#645), when they changed. The notes first, as S15's
+    /// Edit saves them: a rename must reach S14 and the GPX, so it goes last. Neither failure stops
+    /// the other: the notes aren't in the GPX or on S14.
+    private static func saveNameAndNotes(
+        _ id: UUID, title: String?, notes: String?, persistenceClient: PersistenceClient, send: Send<Action>
+    ) async {
+        if let notes {
+            // Logged in RidePersistenceActor. The ride keeps its old notes.
+            try? await persistenceClient.updateRideNotes(id, notes)
+        }
+        guard let title else { return }
+        do {
+            try await persistenceClient.renameRide(id, title)
+        } catch {
+            // Logged in RidePersistenceActor. The ride keeps its old title.
+            return
+        }
+        // S14 read the ride under its old name. Reloaded before the rewrite below, which reads
+        // the whole track back, so the new name shows at once.
+        await send(.rides(.reloadRides))
+        // The GPX was written at ride end, under the old name (#286). A failed rewrite leaves
+        // that file as it was; the rename stands either way.
+        do {
+            try await GPXExporter.rewrite(rideId: id)
+        } catch {
+            logger.error("Rewriting the GPX of renamed ride \(id, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     /// Closes out a ride the rider had already ended (#188), with the end and the export its marker
     /// recorded, then drops the marker. Only once the write lands: a failed finalize keeps it, the
     /// one record of that end, for the next launch. And only this ride's: one started since can
@@ -812,8 +848,11 @@ struct AppFeature {
         if let savedPasses = checkpoint.vehiclePassCount {
             summary.vehiclePassCount = max(summary.vehiclePassCount ?? 0, savedPasses)
         }
+        // S10 never closed for this ride, so its Apple Health choice is the remembered one (#631).
+        @SharedReader(.appPreferences) var preferences
         try await persistenceClient.finalizeRide(
-            pendingEnd.rideId, pendingEnd.endedAt, summary, pendingEnd.gpxFileURL
+            pendingEnd.rideId, pendingEnd.endedAt, summary, pendingEnd.gpxFileURL,
+            preferences.isSyncChosen(.appleHealth)
         )
         rideEndIntentClient.clear(pendingEnd.rideId)
     }

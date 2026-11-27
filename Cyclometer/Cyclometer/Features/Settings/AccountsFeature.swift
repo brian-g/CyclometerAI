@@ -1,9 +1,5 @@
 import ComposableArchitecture
 import Foundation
-import os
-
-// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
-private let logger = Logger.cyclometer(.accounts)
 
 /// S12.1 Strava Account (UX.md §S12.1, TCA.md §4.15, #629), pushed from S12's Accounts row.
 ///
@@ -48,21 +44,10 @@ struct AccountsFeature {
         case athleteFetched(StravaAthlete?)
         /// Connect, and Reconnect in the Permissions section.
         case connectTapped
-        case connectFinished(ConnectOutcome)
+        case connectFinished(StravaConnectOutcome)
         case disconnectTapped
-        #if DEBUG
-        /// S12.1's debug "Upload Latest Ride" (#630). #631 replaces it.
-        case debugUploadTapped
-        #endif
         case alert(PresentationAction<Alert>)
         case delegate(Delegate)
-
-        enum ConnectOutcome: Equatable {
-            case connected
-            /// The rider closed sign-in or declined on Strava: nothing to say.
-            case cancelled
-            case failed
-        }
 
         @CasePathable
         enum Alert: Equatable {
@@ -77,11 +62,6 @@ struct AccountsFeature {
             /// here because `StravaSession` writes the record outside any reducer, where the
             /// parent's `.onChange` would never see it change.
             case connected
-            #if DEBUG
-            /// Sends the newest ride to Strava through `SyncQueueFeature` (#630), so an upload can be
-            /// checked on device before S10's Sync To exists. #631 replaces it.
-            case debugUploadLatestRide
-            #endif
         }
     }
 
@@ -100,15 +80,7 @@ struct AccountsFeature {
                 guard !state.isConnecting else { return .none }
                 state.isConnecting = true
                 return .run { [stravaAuth] send in
-                    do {
-                        _ = try await stravaAuth.connect()
-                        await send(.connectFinished(.connected))
-                    } catch let error as StravaAuthError where error.isRiderCancellation {
-                        await send(.connectFinished(.cancelled))
-                    } catch {
-                        logger.error("Strava connect failed: \(error.localizedDescription, privacy: .public)")
-                        await send(.connectFinished(.failed))
-                    }
+                    await send(.connectFinished(await stravaAuth.connectOutcome()))
                 }
 
             case .connectFinished(let outcome):
@@ -119,7 +91,7 @@ struct AccountsFeature {
                 case .cancelled:
                     return .none
                 case .failed:
-                    state.alert = .connectFailed
+                    state.alert = .stravaConnectFailed
                     return .none
                 }
 
@@ -129,11 +101,6 @@ struct AccountsFeature {
 
             case .alert(.presented(.confirmDisconnect)):
                 return .send(.delegate(.disconnectConfirmed))
-
-            #if DEBUG
-            case .debugUploadTapped:
-                return .send(.delegate(.debugUploadLatestRide))
-            #endif
 
             case .alert, .delegate:
                 return .none
@@ -165,27 +132,6 @@ extension AlertState where Action == AccountsFeature.Action.Alert {
         }
     } message: {
         TextState("Rides already uploaded stay on Strava. Segments and Strava routes shown in Cyclometer are removed.")
-    }
-
-    static let connectFailed = AlertState {
-        TextState("Couldn't Connect to Strava")
-    } actions: {
-        ButtonState(role: .cancel) {
-            TextState("OK")
-        }
-    } message: {
-        TextState("Check your connection and try again.")
-    }
-}
-
-private extension StravaAuthError {
-    /// The rider backed out: closed sign-in, came back from the Strava app without finishing, or
-    /// declined on the consent screen. Not a failure to report.
-    var isRiderCancellation: Bool {
-        switch self {
-        case .cancelled, .denied: true
-        default: false
-        }
     }
 }
 

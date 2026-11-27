@@ -382,7 +382,7 @@ struct AppFeatureTests {
         } withDependencies: {
             $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
             $0.persistenceClient = .mock(
-                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+                onFinalizeRide: { id, _, _, _, _ in finalized.withValue { $0.append(id) } },
                 onFinalizeRideWithoutWorkout: { id, _, _ in finalized.withValue { $0.append(id) } }
             )
         }
@@ -453,9 +453,11 @@ struct AppFeatureTests {
             $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
             $0.rideEndIntentClient = rideEndIntent
             var client = PersistenceClient.mock(
-                onFinalizeRide: { id, endedAt, summary, url in
+                onFinalizeRide: { id, endedAt, summary, url, owesHealthWorkout in
                     finalized.withValue { $0.append((id, endedAt, url)) }
                     finalizedSummaries.withValue { $0.append(summary) }
+                    // Owed only as the remembered Apple Health choice says (#631).
+                    guard owesHealthWorkout else { return }
                     owed.withValue {
                         $0.append(OwedHealthWorkout(
                             rideId: id,
@@ -512,7 +514,7 @@ struct AppFeatureTests {
         } withDependencies: {
             $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
             $0.rideEndIntentClient = .inMemory(initial: marker)
-            $0.persistenceClient = .mock(onFinalizeRide: { _, _, summary, _ in
+            $0.persistenceClient = .mock(onFinalizeRide: { _, _, summary, _, _ in
                 finalizedSummaries.withValue { $0.append(summary) }
             })
         }
@@ -550,7 +552,7 @@ struct AppFeatureTests {
             $0.date = .constant(relaunch)
             $0.rideEndIntentClient = rideEndIntent
             var client = PersistenceClient.mock()
-            client.finalizeRide = { id, endedAt, summary, url in
+            client.finalizeRide = { id, endedAt, summary, url, _ in
                 finalized.withValue { $0.append((id, endedAt, url)) }
                 owed.withValue {
                     $0.append(OwedHealthWorkout(
@@ -601,7 +603,7 @@ struct AppFeatureTests {
             $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
             $0.rideEndIntentClient = rideEndIntent
             var client = PersistenceClient.mock()
-            client.finalizeRide = { _, _, _, _ in
+            client.finalizeRide = { _, _, _, _, _ in
                 attempts.withValue { $0 += 1 }
                 throw PersistenceError.rideNotFound
             }
@@ -636,7 +638,7 @@ struct AppFeatureTests {
         } withDependencies: {
             $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
             $0.rideEndIntentClient = rideEndIntent
-            $0.persistenceClient = .mock(onFinalizeRide: { _, _, _, _ in rideEndIntent.save(newRidesMarker) })
+            $0.persistenceClient = .mock(onFinalizeRide: { _, _, _, _, _ in rideEndIntent.save(newRidesMarker) })
         }
         store.exhaustivity = .off
 
@@ -792,7 +794,7 @@ struct AppFeatureTests {
             $0.locationClient = .testValue
             $0.hapticsClient = .testValue
             var client = PersistenceClient.mock(
-                onFinalizeRide: { id, _, _, _ in finalized.withValue { $0.append(id) } },
+                onFinalizeRide: { id, _, _, _, _ in finalized.withValue { $0.append(id) } },
                 onSaveRideMapThumbnail: { id, _, _ in saved.withValue { $0.append(id) } }
             )
             // A finalized ride is the one that is missing its thumbnail, and the one

@@ -1,5 +1,9 @@
 import ComposableArchitecture
 import Foundation
+import os
+
+// Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
+private let logger = Logger.cyclometer(.accounts)
 
 /// TCA dependency for connecting Strava (TCA.md §4.15, PRD §8.12): sign-in through the Strava app
 /// or an `ASWebAuthenticationSession`, the code exchange through the token service, and the tokens
@@ -61,5 +65,57 @@ extension DependencyValues {
     var stravaAuth: StravaAuthClient {
         get { self[StravaAuthClient.self] }
         set { self[StravaAuthClient.self] = newValue }
+    }
+}
+
+/// How a connect or Reconnect ended, for the screen that started it: S12.1, or S10's Sync To (#631).
+enum StravaConnectOutcome: Equatable, Sendable {
+    case connected
+    /// The rider closed sign-in or declined on Strava: nothing to say.
+    case cancelled
+    case failed
+}
+
+extension StravaAuthClient {
+    /// `connect`, with the rider backing out told apart from a failure, which is logged.
+    func connectOutcome() async -> StravaConnectOutcome {
+        do {
+            _ = try await connect()
+            return .connected
+        } catch let error as StravaAuthError where error.isRiderCancellation {
+            return .cancelled
+        } catch is CancellationError {
+            // The screen that started it closed mid sign-in: not a failure either.
+            return .cancelled
+        } catch {
+            logger.error("Strava connect failed: \(error.localizedDescription, privacy: .public)")
+            return .failed
+        }
+    }
+}
+
+extension AlertState {
+    /// A connect or Reconnect that failed, for any screen that offers one.
+    static var stravaConnectFailed: Self {
+        AlertState {
+            TextState("Couldn't Connect to Strava")
+        } actions: {
+            ButtonState(role: .cancel) {
+                TextState("OK")
+            }
+        } message: {
+            TextState("Check your connection and try again.")
+        }
+    }
+}
+
+private extension StravaAuthError {
+    /// The rider backed out: closed sign-in, came back from the Strava app without finishing, or
+    /// declined on the consent screen. Not a failure to report.
+    var isRiderCancellation: Bool {
+        switch self {
+        case .cancelled, .denied: true
+        default: false
+        }
     }
 }

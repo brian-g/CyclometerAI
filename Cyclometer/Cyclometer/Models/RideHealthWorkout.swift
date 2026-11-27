@@ -5,14 +5,15 @@ import os
 // Stream live: Console.app / Xcode console, filter subsystem "xyz.acmeapps.ride".
 private let logger = Logger.cyclometer(.healthkit)
 
-/// The ride's outdoor cycling `HKWorkout` (UX.md §S10, #250), written until it lands (#277).
+/// The ride's outdoor cycling `HKWorkout` (UX.md §S10, #250), written until it lands (#277), for a
+/// ride the rider sent to Apple Health from S10's Sync To (#631).
 enum RideHealthWorkout {
     /// Writes the workout of every finished ride still owed one, newest first, and returns how
     /// many it settled.
     ///
     /// The one way workouts get written, whichever way a ride ended, like
-    /// `RideMapThumbnail.backfill`. It runs right after a Finish's `finalizeRide`, where the
-    /// newest ride is the one just finished. It runs again at launch (unless the launch resumes
+    /// `RideMapThumbnail.backfill`. It runs as S10 closes, once its Apple Health row has set or
+    /// cleared the ride just finished as owed (#631). It runs again at launch (unless the launch resumes
     /// a ride) and after AppFeature's close-outs, which catches a ride whose finalize failed
     /// (#188), an app killed before the write, and any write that threw. A ride's workout is
     /// then late rather than never.
@@ -22,7 +23,7 @@ enum RideHealthWorkout {
     /// recorded before they did. Otherwise the first failed write ends the batch, since a
     /// locked store fails every ride the same way.
     ///
-    /// One at a time: a Finish can land while the launch backfill is still writing, and both
+    /// One at a time: S10 can close while the launch backfill is still writing, and both
     /// would write the same rides. The later one waits, then reads the owed list afresh.
     @discardableResult
     static func backfill() async -> Int {

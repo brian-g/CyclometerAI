@@ -991,8 +991,12 @@ struct ActiveRideFeature {
 
                         var summary = finalSummary
                         summary.finish = liveFinish?()
+                        // Read now, not at Finish: S10 is already open, and a rider who closes it
+                        // before this lands has just saved their Apple Health choice (#631).
+                        @SharedReader(.appPreferences) var preferences
+                        let owesHealthWorkout = preferences.isSyncChosen(.appleHealth)
                         do {
-                            try await persistenceClient.finalizeRide(rideId, endedAt, summary, gpxURL)
+                            try await persistenceClient.finalizeRide(rideId, endedAt, summary, gpxURL, owesHealthWorkout)
                             // Only now is the ride durably over. Clearing earlier would
                             // discard the one record that survives this write failing. Only
                             // this ride's: a leftover's whose close-out failed stays (#583).
@@ -1004,15 +1008,11 @@ struct ActiveRideFeature {
                             return
                         }
 
-                        // After finalize, so only a durably ended ride reaches Apple Health
-                        // (UX.md §S10, #250): the finalize is what makes it owed a workout.
-                        // Nothing waits on it: a failed write never costs the ride, and is
-                        // retried later (#277). The finish stats too (#460): a ride whose live
-                        // state didn't cover all of it was just left owed them, and a launch that
-                        // resumed this ride skipped the launch backfill.
-                        async let workouts = RideHealthWorkout.backfill()
-                        async let finishStats = RideFinishStats.backfill()
-                        _ = await (workouts, finishStats)
+                        // The finish stats (#460): a ride whose live state didn't cover all of it
+                        // was just left owed them, and a launch that resumed this ride skipped the
+                        // launch backfill. Not the Apple Health workout: S10's Sync To decides
+                        // that, and closing it writes it (#631).
+                        await RideFinishStats.backfill()
                         // The map thumbnail (#177) is captured by `RidesFeature.rideFinished`,
                         // which waits for the finalize above to land and refreshes the list after
                         // it (#248).

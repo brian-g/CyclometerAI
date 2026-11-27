@@ -37,6 +37,7 @@ struct RideEndFailureTests {
         rideEndIntentClient: RideEndIntentClient,
         healthKitClient: HealthKitClient = .testValue,
         profile: RiderProfile = RiderProfile(),
+        syncDestinationDefaults: [SyncDestination: Bool] = [:],
         date: DateGenerator = .constant(testDate)
     ) -> TestStoreOf<ActiveRideFeature> {
         // Seeded in the scope the state is built in: `@SharedReader` resolves on construction.
@@ -46,6 +47,8 @@ struct RideEndFailureTests {
         } operation: {
             @Shared(.riderProfile) var stored
             $stored.withLock { $0 = profile }
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock { $0.syncDestinationDefaults = syncDestinationDefaults }
             return TestStore(
                 initialState: ActiveRideFeature.State(recordingState: .idle)
             ) {
@@ -190,6 +193,30 @@ struct RideEndFailureTests {
         await store.skipInFlightEffects(strict: false)
         await store.finish(timeout: effectDrainTimeout)
         return rideId
+    }
+
+    /// S10 closing with its Apple Health row as `sendsToHealth` (#631), which is what writes the
+    /// workout now: a Finish doesn't. `AppFeature`'s own close is pinned in
+    /// `RideSummaryPresentationTests`; this is its Health half, on the real persistence stack.
+    /// With the ride store's dependencies, so the write reads the same file storage the ride did
+    /// (an S12 zone override, #238).
+    private static func closeRideSummary(
+        _ rideId: UUID,
+        sendsToHealth: Bool = true,
+        store: TestStoreOf<ActiveRideFeature>
+    ) async {
+        await withDependencies {
+            $0 = store.dependencies
+        } operation: {
+            @Dependency(\.persistenceClient) var persistenceClient
+            try? await persistenceClient.setHealthWorkoutOwed(rideId, sendsToHealth)
+            await RideHealthWorkout.backfill()
+        }
+    }
+
+    /// The ride's finalize has landed: what the tests below wait for before closing S10.
+    private static func isEnded(_ swiftDataStack: SwiftDataStack) -> @Sendable (UUID) -> Bool {
+        { fetchRideIfPresent($0, from: swiftDataStack)?.endedAt != nil }
     }
 
     private static func makeTempDirectory() -> URL {
@@ -387,9 +414,71 @@ struct RideEndFailureTests {
         #expect(relaunched.mapThumbnailDark == Data("dark".utf8))
     }
 
-    // MARK: - Apple Health workout (#250)
+    // MARK: - Apple Health workout (#250, #631)
 
-    @Test("a finished ride is written to Apple Health once, after it is finalized, with the persisted ride's start, end, distance and track")
+    @Test("a Finish writes no workout, and leaves the ride owed one while the remembered Apple Health choice is on (#631)")
+    func finishWritesNoWorkout() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let writes = LockIsolated(0)
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            healthKitClient: .mock(onSaveWorkout: { _ in writes.withValue { $0 += 1 } }),
+            date: Self.movingClock()
+        )
+        // Waits for the finish stats too, the finish effect's last step, so a write it made would be in.
+        let rideId = await Self.runRideToEnd(store) {
+            fetchRideIfPresent($0, from: swiftDataStack)?.isFinishStatsOwed == false
+        }
+
+        #expect(writes.value == 0)
+        #expect(try Self.fetchRide(rideId, from: swiftDataStack).isHealthWorkoutOwed)
+    }
+
+    @Test("with Apple Health remembered off, the ride is never owed a workout, so a kill before S10 closes writes none (#631)")
+    func rememberedHealthOffIsNotOwed() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let rideEndIntent = RideEndIntentClient.inMemory()
+        let writes = LockIsolated(0)
+        let healthKit = HealthKitClient.mock(onSaveWorkout: { _ in writes.withValue { $0 += 1 } })
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
+            healthKitClient: healthKit, syncDestinationDefaults: [.appleHealth: false], date: Self.movingClock()
+        )
+        let rideId = await Self.runRideToEnd(store, until: Self.isEnded(swiftDataStack))
+        #expect(try Self.fetchRide(rideId, from: swiftDataStack).isHealthWorkoutOwed == false)
+
+        // Killed with S10 still open: the launch backfill finds nothing owed.
+        await Self.relaunch(
+            persistenceClient: client, documentsDirectory: tempDir,
+            rideEndIntentClient: rideEndIntent, healthKitClient: healthKit
+        )
+        #expect(writes.value == 0)
+    }
+
+    @Test("closing S10 with Apple Health off clears a ride the remembered choice left owed, and writes nothing (#631)")
+    func closingWithHealthOffWritesNothing() async throws {
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
+        let tempDir = Self.makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let writes = LockIsolated(0)
+        let healthKit = HealthKitClient.mock(onSaveWorkout: { _ in writes.withValue { $0 += 1 } })
+        let store = Self.makeRideStore(
+            persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: .inMemory(),
+            healthKitClient: healthKit, date: Self.movingClock()
+        )
+        let rideId = await Self.runRideToEnd(store, until: Self.isEnded(swiftDataStack))
+
+        await Self.closeRideSummary(rideId, sendsToHealth: false, store: store)
+
+        #expect(writes.value == 0)
+        #expect(try Self.fetchRide(rideId, from: swiftDataStack).isHealthWorkoutOwed == false)
+    }
+
+    @Test("a ride sent to Apple Health from S10 is written once, after it is finalized, with the persisted ride's start, end, distance and track")
     func finishedRideIsWrittenToHealthAfterFinalize() async throws {
         let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         let tempDir = Self.makeTempDirectory()
@@ -413,7 +502,8 @@ struct RideEndFailureTests {
             }),
             date: movingClock
         )
-        let rideId = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5, until: Self.isEnded(swiftDataStack))
+        await Self.closeRideSummary(rideId, store: store)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         // Moving, so the distance comparison below can't pass on two zeros.
@@ -443,7 +533,7 @@ struct RideEndFailureTests {
 
     @Test("with Health's own preferred zones in effect, the workout isn't stamped with zones (#238)")
     func healthZonesAreNotStamped() async throws {
-        let (client, _) = PersistenceClientTests.makeLiveClient()
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         let tempDir = Self.makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
         let written = LockIsolated<[RideWorkout]>([])
@@ -458,7 +548,8 @@ struct RideEndFailureTests {
             }),
             date: movingClock
         )
-        _ = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5, until: Self.isEnded(swiftDataStack))
+        await Self.closeRideSummary(rideId, store: store)
 
         // The ride did see Health's zones — otherwise nil here would prove nothing.
         #expect(store.state.healthZoneCeilingsBPM == [120, 140, 160, 175])
@@ -468,7 +559,7 @@ struct RideEndFailureTests {
 
     @Test("with a boundary overridden in S12, the workout carries the zones the dashboard used (#238)")
     func overriddenZonesAreStamped() async throws {
-        let (client, _) = PersistenceClientTests.makeLiveClient()
+        let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         let tempDir = Self.makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
         let written = LockIsolated<[RideWorkout]>([])
@@ -484,7 +575,8 @@ struct RideEndFailureTests {
             profile: RiderProfile(zone1CeilingOverrideBPM: 130),
             date: movingClock
         )
-        _ = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5, until: Self.isEnded(swiftDataStack))
+        await Self.closeRideSummary(rideId, store: store)
 
         #expect(store.state.healthZoneCeilingsBPM == [120, 140, 160, 175])
         let workout = try #require(written.value.first)
@@ -509,7 +601,8 @@ struct RideEndFailureTests {
             }),
             date: movingClock
         )
-        let rideId = await Self.runRideToEnd(store, speedMPS: 5) { _ in !written.value.isEmpty }
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5, until: Self.isEnded(swiftDataStack))
+        await Self.closeRideSummary(rideId, store: store)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         let workout = try #require(written.value.first)
@@ -545,7 +638,8 @@ struct RideEndFailureTests {
             ),
             date: movingClock
         )
-        let rideId = await Self.runRideToEnd(store, speedMPS: 5, heartRateBPM: 140) { _ in !written.value.isEmpty }
+        let rideId = await Self.runRideToEnd(store, speedMPS: 5, heartRateBPM: 140, until: Self.isEnded(swiftDataStack))
+        await Self.closeRideSummary(rideId, store: store)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         let workout = try #require(written.value.first)
@@ -569,38 +663,31 @@ struct RideEndFailureTests {
         #expect(physics.kilocalories != expected.kilocalories)
     }
 
-    @Test("an Apple Health workout write failure at ride end still ends the ride, and the steps after it still run")
+    @Test("an Apple Health workout write failure as S10 closes leaves the ride ended and still owed, and the next launch writes it")
     func workoutWriteFailureStillEndsRide() async throws {
         let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         let tempDir = Self.makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
         let rideEndIntent = RideEndIntentClient.inMemory()
         let attempts = LockIsolated(0)
-        let renders = LockIsolated(0)
+        // Sharing allowed, and the write throws anyway: a locked store, say.
+        let failing = HealthKitClient.mock(onSaveWorkout: { _ in
+            attempts.withValue { $0 += 1 }
+            throw WriteFailed()
+        })
 
         let store = Self.makeRideStore(
             persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
-            // Sharing allowed, and the write throws anyway: a locked store, say.
-            healthKitClient: .mock(onSaveWorkout: { _ in
-                attempts.withValue { $0 += 1 }
-                throw WriteFailed()
-            }),
-            date: Self.movingClock()
+            healthKitClient: failing, date: Self.movingClock()
         )
-        // The workout is the finish effect's last step.
-        let rideId = await Self.runRideToEnd(store) { _ in attempts.value > 0 }
-        // Then the Rides tab's capture (#248), which the failed write mustn't have stopped.
-        await Self.finishOnRidesTab(
-            rideId, persistenceClient: client, mapSnapshotClient: Self.countingSnapshots(renders)
-        )
+        let rideId = await Self.runRideToEnd(store, until: Self.isEnded(swiftDataStack))
+        await Self.closeRideSummary(rideId, store: store)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(attempts.value == 1)
-        #expect(renders.value == 2)
         #expect(ride.recordingState == .ended)
         #expect(ride.endedAt != nil)
         #expect(ride.gpxFileURL != nil)
-        #expect(ride.mapThumbnailDark == Data("dark".utf8))
         #expect(rideEndIntent.loadAll().isEmpty)
         // The workout is still owed (#277)...
         #expect(ride.isHealthWorkoutOwed)
@@ -628,7 +715,7 @@ struct RideEndFailureTests {
         #expect(written.value.count == 1)
     }
 
-    @Test("a finished ride's workout is settled once written, so no later launch writes it again")
+    @Test("a ride's workout is settled once written, so no later launch writes it again")
     func writtenWorkoutIsSettled() async throws {
         let (client, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         let tempDir = Self.makeTempDirectory()
@@ -641,9 +728,8 @@ struct RideEndFailureTests {
             persistenceClient: client, documentsDirectory: tempDir, rideEndIntentClient: rideEndIntent,
             healthKitClient: healthKit, date: Self.movingClock()
         )
-        let rideId = await Self.runRideToEnd(store) {
-            fetchRideIfPresent($0, from: swiftDataStack)?.isHealthWorkoutOwed == false && writes.value > 0
-        }
+        let rideId = await Self.runRideToEnd(store, until: Self.isEnded(swiftDataStack))
+        await Self.closeRideSummary(rideId, store: store)
         #expect(writes.value == 1)
         #expect(try Self.fetchRide(rideId, from: swiftDataStack).isHealthWorkoutOwed == false)
 
@@ -660,7 +746,7 @@ struct RideEndFailureTests {
     func finalizeFailureIsRecoveredAtLaunchRatherThanResumed() async throws {
         let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         var failingClient = liveClient
-        failingClient.finalizeRide = { _, _, _, _ in throw WriteFailed() }
+        failingClient.finalizeRide = { _, _, _, _, _ in throw WriteFailed() }
 
         let tempDir = Self.makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -759,7 +845,7 @@ struct RideEndFailureTests {
         let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         var failingClient = liveClient
         failingClient.updateRideSummary = { _ in throw WriteFailed() }
-        failingClient.finalizeRide = { _, _, _, _ in throw WriteFailed() }
+        failingClient.finalizeRide = { _, _, _, _, _ in throw WriteFailed() }
 
         let tempDir = Self.makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
@@ -803,7 +889,7 @@ struct RideEndFailureTests {
     func failedCloseOutsMarkerSurvivesTheNextRidesFinish() async throws {
         let (liveClient, swiftDataStack) = PersistenceClientTests.makeLiveClient()
         var failingClient = liveClient
-        failingClient.finalizeRide = { _, _, _, _ in throw WriteFailed() }
+        failingClient.finalizeRide = { _, _, _, _, _ in throw WriteFailed() }
 
         let tempDir = Self.makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tempDir) }
