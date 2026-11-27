@@ -17,7 +17,8 @@ private let logger = Logger.cyclometer(.network)
 /// upload id is kept) → `synced` with the activity id, or `failed` with Strava's reason. Strava
 /// rejecting the file as a duplicate is `synced` with the existing activity: many riders' Strava
 /// app imports Apple Health. Anything that can pass (offline, the rate limit, an account that needs
-/// reconnecting) leaves the record where it was, with the reason, for the next `resume`.
+/// reconnecting) leaves the record where it was, with the reason, for a later `resume`: on a backoff
+/// timer for what passes by itself, when a 429 resets, or when the rider reconnects.
 @Reducer
 struct SyncQueueFeature {
     @Dependency(\.strava) var strava
@@ -30,9 +31,32 @@ struct SyncQueueFeature {
         /// Rides with a job running, so a `resume` landing beside an `enqueue` never sends one
         /// twice.
         var inFlight: Set<UUID> = []
-        /// After Strava's 429: nothing calls it before this (`StravaError.rateLimited`).
-        var heldUntil: Date?
+        /// After Strava's 429: nothing calls it before this (`StravaError.rateLimited`). Saved, so
+        /// a relaunch inside the window doesn't spend a request on another refusal.
+        @Shared(.stravaUploadsHeldUntil) var heldUntil
+        /// Backoff retries in a row that found something still waiting. A ride that settles starts
+        /// it over: Strava is reachable again.
+        var retryAttempt = 0
+        /// A backoff retry is set and no `resume` has run since, so a batch of waiting rides sets
+        /// one retry, not one each.
+        var isRetryPending = false
     }
+
+    /// How a ride's job ended, for what the queue does next.
+    enum JobOutcome: Equatable, Sendable {
+        /// `synced` or `failed`: nothing left to try.
+        case settled
+        /// Nothing was done: already on Strava, the ride gone, or stopped behind a 429.
+        case skipped
+        /// It can pass by itself (offline, 5xx, still processing): a backoff retry.
+        case waiting
+        /// Waits on the rider reconnecting, which resumes the queue itself (S12.1's `connected`).
+        case waitingOnRider
+        /// Strava's 429: resumed when it resets.
+        case held(until: Date)
+    }
+
+    enum CancelID { case heldResume, retry }
 
     enum Action: Equatable {
         /// The rider chose to send this ride to Strava.
@@ -40,8 +64,13 @@ struct SyncQueueFeature {
         /// Picks up every record left with work to do.
         case resume
         case owedFetched([OwedSync])
-        case jobFinished(rideId: UUID, heldUntil: Date?)
+        case jobFinished(rideId: UUID, outcome: JobOutcome)
     }
+
+    /// Waits before each backoff retry: 30 s, then 1, 2, 5 and 10 min, then every 15 min. A bike
+    /// computer can stay in the foreground for hours, so `.active` alone would leave a ride offline
+    /// at the café waiting until the rider next switches apps.
+    static let retryDelays: [Duration] = [.seconds(30), .seconds(60), .seconds(120), .seconds(300), .seconds(600), .seconds(900)]
 
     /// Strava answers `POST /uploads` before it has processed the file: polled after 1, 2 and
     /// 4 s, then every 8 s, for two minutes (PRD §8.12). The last poll is at 119 s.
@@ -73,6 +102,9 @@ struct SyncQueueFeature {
                 return upload([rideId])
 
             case .resume:
+                state.isRetryPending = false
+                // A hold saved before a relaunch: resumed when it resets, not on the next `.active`.
+                if let heldUntil = state.heldUntil, heldUntil > date.now { return resume(after: heldUntil) }
                 guard holdReason(state) == nil else { return .none }
                 return .run { [persistenceClient] send in
                     do {
@@ -93,14 +125,42 @@ struct SyncQueueFeature {
                 state.inFlight.formUnion(rideIds)
                 return upload(rideIds)
 
-            case let .jobFinished(rideId, heldUntil):
+            case let .jobFinished(rideId, outcome):
                 state.inFlight.remove(rideId)
-                if let heldUntil {
-                    state.heldUntil = max(state.heldUntil ?? heldUntil, heldUntil)
+                switch outcome {
+                case .settled:
+                    state.retryAttempt = 0
+                    return .none
+                case .skipped, .waitingOnRider:
+                    return .none
+                case .held(let until):
+                    let heldUntil = max(state.heldUntil ?? until, until)
+                    state.$heldUntil.withLock { $0 = heldUntil }
+                    return resume(after: heldUntil)
+                case .waiting:
+                    guard !state.isRetryPending else { return .none }
+                    let delay = Self.retryDelays[min(state.retryAttempt, Self.retryDelays.count - 1)]
+                    state.retryAttempt += 1
+                    state.isRetryPending = true
+                    logger.info("strava retry in \(delay.components.seconds, privacy: .public) s")
+                    return .run { [clock] send in
+                        try await clock.sleep(for: delay)
+                        await send(.resume)
+                    }
+                    .cancellable(id: CancelID.retry, cancelInFlight: true)
                 }
-                return .none
             }
         }
+    }
+
+    /// Resumes once Strava's 429 has reset. A second after, so the resume doesn't land a moment
+    /// early on a wall clock that disagrees with the continuous one, and find itself still held.
+    private func resume(after heldUntil: Date) -> Effect<Action> {
+        .run { [clock, date] send in
+            try await clock.sleep(for: .seconds(max(0, heldUntil.timeIntervalSince(date.now))) + .seconds(1))
+            await send(.resume)
+        }
+        .cancellable(id: CancelID.heldResume, cancelInFlight: true)
     }
 
     /// Why nothing can go to Strava now, or nil when it can.
@@ -139,16 +199,16 @@ struct SyncQueueFeature {
         .run { [strava, persistenceClient, clock, date] send in
             var isHeld = false
             for rideId in rideIds {
-                var heldUntil: Date?
-                // After a 429 the rest only leave `inFlight`; their records wait for the next `resume`.
+                var outcome = JobOutcome.skipped
+                // After a 429 the rest only leave `inFlight`; their records wait for the hold to end.
                 if !isHeld, let record = await Self.startingRecord(rideId: rideId, persistenceClient: persistenceClient) {
                     let job = StravaUploadJob(
                         rideId: rideId, strava: strava, persistenceClient: persistenceClient, clock: clock, now: { date.now }
                     )
-                    heldUntil = await job.run(from: record)
-                    isHeld = heldUntil != nil
+                    outcome = await job.run(from: record)
+                    if case .held = outcome { isHeld = true }
                 }
-                await send(.jobFinished(rideId: rideId, heldUntil: heldUntil))
+                await send(.jobFinished(rideId: rideId, outcome: outcome))
             }
         }
     }
@@ -192,22 +252,20 @@ private struct StravaUploadJob {
     let clock: any Clock<Duration>
     let now: @Sendable () -> Date
 
-    /// Runs to a settled record, or to one left waiting. Returns when Strava may next be called,
-    /// after a 429.
-    func run(from start: RideSyncRecord) async -> Date? {
+    /// Runs to a settled record, or to one left waiting, and says which.
+    func run(from start: RideSyncRecord) async -> SyncQueueFeature.JobOutcome {
         var record = start
         do {
             if record.remoteUploadId == nil {
                 try await upload(&record)
             }
-            try await poll(record)
-            return nil
+            return try await poll(record) ? .settled : .waiting
         } catch is CancellationError {
             // The record stands as last written; the next launch resumes it.
-            return nil
+            return .skipped
         } catch PersistenceError.rideNotFound {
             logger.notice("strava upload dropped: the ride is gone")
-            return nil
+            return .skipped
         } catch {
             return await recordWaiting(record, after: error)
         }
@@ -241,8 +299,9 @@ private struct StravaUploadJob {
     /// stays `processing` with its upload id, polled again at the next `resume`. Settles a copy:
     /// when its save fails, `run` still holds the `processing` record and its upload id, so
     /// `recordWaiting` leaves it to be polled again rather than sent again.
-    private func poll(_ processing: RideSyncRecord) async throws {
-        guard let rawID = processing.remoteUploadId else { return }
+    /// True once settled, false when still processing.
+    private func poll(_ processing: RideSyncRecord) async throws -> Bool {
+        guard let rawID = processing.remoteUploadId else { return true }
         var record = processing
         let uploadID = StravaUploadID(rawValue: rawID)
         for delay in SyncQueueFeature.pollDelays {
@@ -263,23 +322,24 @@ private struct StravaUploadJob {
                 } else {
                     logger.info("strava upload: synced")
                 }
-                return
+                return true
             case .failed(let reason):
                 record.status = .failed
                 record.remoteUploadId = nil
                 record.errorMessage = reason
                 try await save(record)
                 logger.notice("strava upload: failed: \(reason, privacy: .public)")
-                return
+                return true
             }
         }
         record.errorMessage = SyncReason.stillProcessing
         try await save(record)
         logger.notice("strava upload: still processing after two minutes")
+        return false
     }
 
     /// Leaves the record for the next `resume`, or fails it when trying again can't help.
-    private func recordWaiting(_ record: RideSyncRecord, after error: any Error) async -> Date? {
+    private func recordWaiting(_ record: RideSyncRecord, after error: any Error) async -> SyncQueueFeature.JobOutcome {
         let outcome = SyncFailure(error, isPolling: record.remoteUploadId != nil)
         var record = record
         switch outcome.action {
@@ -296,7 +356,7 @@ private struct StravaUploadJob {
         }
         logger.notice("strava upload: \(record.status.rawValue, privacy: .public): \(outcome.reason, privacy: .public)")
         try? await save(record)
-        return outcome.heldUntil
+        return outcome.outcome
     }
 
     private func save(_ record: RideSyncRecord) async throws {
@@ -319,6 +379,18 @@ struct SyncFailure: Equatable {
     var action: Action
     var reason: String
     var heldUntil: Date?
+    /// Only the rider reconnecting can clear it, so retrying on a timer would only spend requests.
+    var waitsOnRider = false
+
+    /// What the queue does next.
+    var outcome: SyncQueueFeature.JobOutcome {
+        switch action {
+        case .fail: .settled
+        case .reupload: .waiting
+        case .wait:
+            if let heldUntil { .held(until: heldUntil) } else if waitsOnRider { .waitingOnRider } else { .waiting }
+        }
+    }
 
     init(_ error: any Error, isPolling: Bool) {
         switch error {
@@ -334,6 +406,7 @@ struct SyncFailure: Equatable {
             // A 401 after a refresh: the upload scope is most likely missing (#627).
             action = .wait
             reason = SyncReason.noUploadScope
+            waitsOnRider = true
         case StravaError.http(status: 404) where isPolling:
             action = .reupload
             reason = SyncReason.uploadLost
@@ -350,6 +423,7 @@ struct SyncFailure: Equatable {
             // PRD §8.12: uploads waiting on Strava stay pending until the rider reconnects.
             action = .wait
             reason = SyncReason.notConnected
+            waitsOnRider = true
         case is StravaAuthError:
             // The token service: a refresh that couldn't run.
             action = .wait
@@ -370,5 +444,13 @@ private extension RideSyncRecord {
         record.status = remoteUploadId == nil ? .pending : .processing
         record.errorMessage = reason
         return record
+    }
+}
+
+extension SharedKey where Self == FileStorageKey<Date?>.Default {
+    /// `SyncQueueFeature`'s hold after Strava's 429 (#630). A file of its own: it's the queue's
+    /// state, not a preference.
+    static var stravaUploadsHeldUntil: Self {
+        Self[.fileStorage(.documentsDirectory.appending(component: "strava-uploads-held-until.json")), default: nil]
     }
 }

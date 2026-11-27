@@ -208,9 +208,7 @@ struct RideSummaryFeatureTests {
 
         await store.send(.task)
         await store.receive(\.loaded)
-        // 30 reads, each a few hops even on an immediate clock: the 1 s default can run out on a
-        // loaded simulator, and with exhaustivity off that shows only as a short read count.
-        await store.finish(timeout: .seconds(30))
+        await store.finish()
 
         #expect(store.state.load == .loaded)
         #expect(store.state.stats == owed)

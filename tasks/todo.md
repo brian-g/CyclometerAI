@@ -3463,3 +3463,10 @@ Review (2026-11-27):
   re-reading its record; a failed save after Strava has the file keeps the upload id. Skipped, open: retry only
   on `.active` (no timer for `heldUntil` or backoff), `heldUntil` not persisted across launches, default
   reason wording (#632), clock-advance race in queue tests (not seen).
+- Retry timing (review #5, #6), 2026-11-27: `JobOutcome` per job. A 429 resumes the queue when it resets, and the
+  hold is saved (`.stravaUploadsHeldUntil`), so a relaunch inside it stays held. Transient waits set one backoff
+  resume (30 s → 15 min cap), reset when a ride settles; rider-only waits (no account or scope) set none.
+  +5 tests. Clock-advance race in the queue tests deferred; wording of `SyncReason` noted on #632.
+- Full suite after the retry change: 2855 passed; `finishStatsNeverStored` and `RideDashboardSnapshotTests.testRideDashboardRiding`
+  failed, and fail the same way on main (checked in a scratch checkout). The 30 s `finish` timeout didn't help (13 of 31
+  reads: the thread pool is starved under the full run), so it's reverted to main's version. Both are pre-existing flakes.

@@ -121,7 +121,7 @@ struct SyncQueueFeatureTests {
         await clock.advance(by: .seconds(3))
         #expect(log.polls.value == 2)
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .settled)) { $0.inFlight = [] }
 
         #expect(log.polls.value == 3)
         #expect(log.records.value == [Self.uploading, Self.processing(), Self.synced("999")])
@@ -141,7 +141,7 @@ struct SyncQueueFeatureTests {
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .settled)) { $0.inFlight = [] }
 
         #expect(log.records.value == [Self.uploading, Self.processing(), Self.synced("123")])
     }
@@ -154,7 +154,7 @@ struct SyncQueueFeatureTests {
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .settled)) { $0.inFlight = [] }
 
         #expect(log.records.value.last == RideSyncRecord(service: .strava, status: .failed, errorMessage: "Improperly formatted data."))
     }
@@ -167,7 +167,12 @@ struct SyncQueueFeatureTests {
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
         await clock.advance(by: .seconds(119))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waiting)) {
+            $0.inFlight = []
+            $0.retryAttempt = 1
+            $0.isRetryPending = true
+        }
+        await store.skipInFlightEffects()
 
         #expect(log.polls.value == SyncQueueFeature.pollDelays.count)
         #expect(log.records.value == [
@@ -193,7 +198,12 @@ struct SyncQueueFeatureTests {
         )
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waiting)) {
+            $0.inFlight = []
+            $0.retryAttempt = 1
+            $0.isRetryPending = true
+        }
+        await store.skipInFlightEffects()
 
         #expect(log.records.value == [
             Self.uploading, RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.offline),
@@ -216,7 +226,12 @@ struct SyncQueueFeatureTests {
         await store.send(.resume)
         await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waiting)) {
+            $0.inFlight = []
+            $0.retryAttempt = 1
+            $0.isRetryPending = true
+        }
+        await store.skipInFlightEffects()
 
         #expect(log.uploads.value.isEmpty)
         #expect(log.records.value == [Self.processing(reason: SyncReason.unreachable)])
@@ -233,9 +248,9 @@ struct SyncQueueFeatureTests {
         )
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: until)) {
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .held(until: until))) {
             $0.inFlight = []
-            $0.heldUntil = until
+            $0.$heldUntil.withLock { $0 = until }
         }
         #expect(log.records.value == [
             Self.uploading, RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.rateLimited),
@@ -243,8 +258,9 @@ struct SyncQueueFeatureTests {
 
         // Held: no fetch, no upload.
         await store.send(.resume)
-        await store.send(.enqueue(rideId: Self.otherRideId))
-        await store.finish()
+        await store.send(.enqueue(rideId: Self.otherRideId)).finish()
+        // Left running: the resume set for when the hold ends.
+        await store.skipInFlightEffects()
         #expect(log.uploads.value.isEmpty)
         // The held enqueue writes its own waiting record, the same as the first ride's.
         let waiting = RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.rateLimited)
@@ -266,7 +282,12 @@ struct SyncQueueFeatureTests {
         await store.send(.resume)
         await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waiting)) {
+            $0.inFlight = []
+            $0.retryAttempt = 1
+            $0.isRetryPending = true
+        }
+        await store.skipInFlightEffects()
 
         #expect(log.records.value == [
             RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.uploadLost),
@@ -303,7 +324,7 @@ struct SyncQueueFeatureTests {
         )
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .skipped)) { $0.inFlight = [] }
 
         #expect(log.uploads.value.isEmpty)
         #expect(log.records.value.isEmpty)
@@ -334,7 +355,7 @@ struct SyncQueueFeatureTests {
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .settled)) { $0.inFlight = [] }
 
         #expect(log.uploads.value.isEmpty)
         #expect(log.records.value == [Self.synced("555")])
@@ -352,7 +373,7 @@ struct SyncQueueFeatureTests {
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .settled)) { $0.inFlight = [] }
 
         #expect(log.uploads.value.count == 1)
         #expect(log.records.value == [Self.uploading, Self.processing("42"), Self.synced("555")])
@@ -378,10 +399,10 @@ struct SyncQueueFeatureTests {
         await store.send(.resume)
         await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId, Self.otherRideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil))
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .settled))
         #expect(log.polls.value == 1)
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.otherRideId, heldUntil: nil))
+        await store.receive(.jobFinished(rideId: Self.otherRideId, outcome: .settled))
 
         #expect(store.state.inFlight.isEmpty)
         #expect(log.uploads.value.map(\.externalID) == [Self.rideId.uuidString])
@@ -399,13 +420,18 @@ struct SyncQueueFeatureTests {
             owed: [OwedSync(rideId: Self.rideId, record: pending), OwedSync(rideId: Self.otherRideId, record: pending)]
         )
 
+        // Not exhaustive: the jobs finish before `owedFetched` is asserted, and `heldUntil` is a
+        // live `@Shared` reference, so the hold would already show in that earlier step.
+        store.exhaustivity = .off(showSkippedAssertions: false)
+
         await store.send(.resume)
-        await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId, Self.otherRideId] }
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: until)) {
-            $0.inFlight = [Self.otherRideId]
-            $0.heldUntil = until
-        }
-        await store.receive(.jobFinished(rideId: Self.otherRideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(\.owedFetched)
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .held(until: until)))
+        await store.receive(.jobFinished(rideId: Self.otherRideId, outcome: .skipped))
+        await store.skipInFlightEffects()
+
+        #expect(store.state.inFlight.isEmpty)
+        #expect(store.state.heldUntil == until)
 
         #expect(log.records.value == [
             Self.uploading, RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.rateLimited),
@@ -423,7 +449,7 @@ struct SyncQueueFeatureTests {
 
         await store.send(.resume)
         await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId] }
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .skipped)) { $0.inFlight = [] }
 
         #expect(log.uploads.value.isEmpty)
         #expect(log.records.value.isEmpty)
@@ -441,7 +467,12 @@ struct SyncQueueFeatureTests {
 
         await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waiting)) {
+            $0.inFlight = []
+            $0.retryAttempt = 1
+            $0.isRetryPending = true
+        }
+        await store.skipInFlightEffects()
 
         #expect(log.uploads.value.count == 1)
         #expect(log.records.value == [Self.uploading, Self.processing(), Self.processing(reason: SyncReason.rideUnreadable)])
@@ -458,6 +489,129 @@ struct SyncQueueFeatureTests {
         await store.send(.owedFetched([OwedSync(rideId: Self.rideId, record: RideSyncRecord(service: .strava, status: .pending))]))
 
         #expect(log.records.value.isEmpty)
+        #expect(log.uploads.value.isEmpty)
+    }
+
+    // MARK: - Retrying
+
+    @Test("A ride left waiting is tried again on a backoff, and the backoff starts over once a ride settles")
+    func waitingRetriesOnBackoff() async {
+        let log = Log()
+        let clock = TestClock()
+        let isOffline = LockIsolated(true)
+        let pending = RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.offline)
+        let store = makeStore(
+            strava: strava(statuses: [.ready(activityID: "555")], log: log) {
+                if isOffline.value { throw URLError(.notConnectedToInternet) }
+            },
+            log: log,
+            owed: [OwedSync(rideId: Self.rideId, record: pending)],
+            clock: clock
+        )
+
+        await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waiting)) {
+            $0.inFlight = []
+            $0.retryAttempt = 1
+            $0.isRetryPending = true
+        }
+
+        // Still offline at 30 s: the next wait is a minute.
+        await clock.advance(by: SyncQueueFeature.retryDelays[0])
+        await store.receive(.resume) { $0.isRetryPending = false }
+        await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waiting)) {
+            $0.inFlight = []
+            $0.retryAttempt = 2
+            $0.isRetryPending = true
+        }
+
+        isOffline.setValue(false)
+        await clock.advance(by: SyncQueueFeature.retryDelays[1])
+        await store.receive(.resume) { $0.isRetryPending = false }
+        await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId] }
+        await clock.advance(by: .seconds(1))
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .settled)) {
+            $0.inFlight = []
+            $0.retryAttempt = 0
+        }
+        #expect(log.records.value.last == Self.synced("555"))
+    }
+
+    @Test("Rides left waiting together set one retry, not one each")
+    func waitingRidesShareOneRetry() async {
+        let log = Log()
+        let pending = RideSyncRecord(service: .strava, status: .pending)
+        let store = makeStore(
+            strava: strava(statuses: [], log: log) { throw URLError(.notConnectedToInternet) },
+            log: log,
+            owed: [OwedSync(rideId: Self.rideId, record: pending), OwedSync(rideId: Self.otherRideId, record: pending)]
+        )
+
+        await store.send(.resume)
+        await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId, Self.otherRideId] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waiting)) {
+            $0.inFlight = [Self.otherRideId]
+            $0.retryAttempt = 1
+            $0.isRetryPending = true
+        }
+        await store.receive(.jobFinished(rideId: Self.otherRideId, outcome: .waiting)) { $0.inFlight = [] }
+        await store.skipInFlightEffects()
+    }
+
+    @Test("Waiting on the rider to reconnect sets no retry: the reconnect resumes the queue")
+    func waitingOnRiderDoesNotRetry() async {
+        let log = Log()
+        let store = makeStore(strava: strava(statuses: [], log: log) { throw StravaAuthError.disconnected }, log: log)
+
+        await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .waitingOnRider)) { $0.inFlight = [] }
+    }
+
+    @Test("When Strava's 429 resets, the queue resumes by itself")
+    func holdEndsWithResume() async {
+        let log = Log()
+        let clock = TestClock()
+        let now = LockIsolated(Self.now)
+        let until = Self.now.addingTimeInterval(900)
+        let store = makeStore(
+            strava: strava(statuses: [], log: log) { throw StravaError.rateLimited(until: until) },
+            log: log,
+            clock: clock
+        )
+        store.dependencies.date = DateGenerator { now.value }
+
+        await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
+        await store.receive(.jobFinished(rideId: Self.rideId, outcome: .held(until: until))) {
+            $0.inFlight = []
+            $0.$heldUntil.withLock { $0 = until }
+        }
+
+        await clock.advance(by: .seconds(900))
+        now.setValue(until.addingTimeInterval(1))
+        await clock.advance(by: .seconds(1))
+        await store.receive(.resume)
+        await store.receive(\.owedFetched)
+    }
+
+    @Test("A hold saved before a relaunch holds the resume, and sets it for when the hold ends")
+    func savedHoldOutlivesRelaunch() async {
+        let log = Log()
+        let clock = TestClock()
+        let until = Self.now.addingTimeInterval(900)
+        let store = makeStore(
+            strava: strava(statuses: [], log: log), log: log,
+            owed: [OwedSync(rideId: Self.rideId, record: RideSyncRecord(service: .strava, status: .pending))],
+            clock: clock
+        ) { $0.$heldUntil.withLock { $0 = until } }
+
+        await store.send(.resume)
+        await clock.advance(by: .seconds(899))
+        #expect(log.uploads.value.isEmpty)
+        // At the reset the resume comes back, still held on the test's fixed clock, and sets another.
+        await clock.advance(by: .seconds(2))
+        await store.receive(.resume)
+        await store.skipInFlightEffects()
         #expect(log.uploads.value.isEmpty)
     }
 
@@ -478,5 +632,14 @@ struct SyncQueueFeatureTests {
         ))
         #expect(SyncFailure(StravaAuthError.disconnected, isPolling: false).reason == SyncReason.notConnected)
         #expect(SyncFailure(StravaAuthError.tokenService(status: 502), isPolling: false).action == .wait)
+
+        // What the queue does next.
+        #expect(SyncFailure(URLError(.notConnectedToInternet), isPolling: false).outcome == .waiting)
+        #expect(SyncFailure(StravaError.http(status: 404), isPolling: true).outcome == .waiting)
+        #expect(SyncFailure(StravaError.http(status: 413), isPolling: false).outcome == .settled)
+        #expect(SyncFailure(StravaError.unauthorized, isPolling: false).outcome == .waitingOnRider)
+        #expect(SyncFailure(StravaAuthError.notConnected, isPolling: false).outcome == .waitingOnRider)
+        let until = Self.now.addingTimeInterval(60)
+        #expect(SyncFailure(StravaError.rateLimited(until: until), isPolling: false).outcome == .held(until: until))
     }
 }
