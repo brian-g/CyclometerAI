@@ -50,10 +50,11 @@ actor RidePersistenceActor {
     /// is logically one atomic write, not the two independent round trips an earlier
     /// version of this actor required to avoid two contexts racing on the same row.
     ///
-    /// `owesHealthWorkout` is false only for a launch close-out with no ride-end marker (#606):
-    /// its end is the relaunch, so it is never owed a workout, not even between two writes.
+    /// `owesHealthWorkout` is the rider's remembered Sync To choice for Apple Health (#631), and
+    /// always false for a launch close-out with no ride-end marker (#606): its end is the
+    /// relaunch, so it is never owed a workout, not even between two writes.
     func finalizeRide(
-        id: UUID, endedAt: Date, summary: RideSummaryUpdate, gpxFileURL: URL?, owesHealthWorkout: Bool = true
+        id: UUID, endedAt: Date, summary: RideSummaryUpdate, gpxFileURL: URL?, owesHealthWorkout: Bool
     ) throws {
         try savingChanges("finalizeRide", id: id, context: modelContext) {
             let ride = try fetchRide(id: id)
@@ -61,8 +62,8 @@ actor RidePersistenceActor {
             ride.endedAt = endedAt
             ride.recordingState = .ended
             ride.gpxFileURL = gpxFileURL
-            // Durably over, so now owed its Apple Health workout (#277) — on every path that
-            // ends a ride, since all of them come through here, bar the one whose end is unknown.
+            // Durably over, so owed its Apple Health workout (#277) if the rider's remembered
+            // Sync To choice says so (#631). In the same write, so a kill right after follows it.
             ride.isHealthWorkoutOwed = owesHealthWorkout
             // The live finish's ascent, descent and energy (#460). Without them — a close-out,
             // or a resume whose saved track hadn't come back — the ride is owed them from its
@@ -174,6 +175,13 @@ actor RidePersistenceActor {
     func settleHealthWorkout(id: UUID) throws {
         try savingChanges("settleHealthWorkout", id: id, context: modelContext) {
             try fetchRide(id: id).isHealthWorkoutOwed = false
+        }
+    }
+
+    /// S10's Apple Health row as the rider left it when the sheet closed (#631).
+    func setHealthWorkoutOwed(id: UUID, owed: Bool) throws {
+        try savingChanges("setHealthWorkoutOwed", id: id, context: modelContext) {
+            try fetchRide(id: id).isHealthWorkoutOwed = owed
         }
     }
 

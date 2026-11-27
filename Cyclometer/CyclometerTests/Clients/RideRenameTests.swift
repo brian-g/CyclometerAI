@@ -64,7 +64,7 @@ struct RideRenameTests {
             durationSeconds: 3, distanceMeters: 12, averageSpeedMPS: 4, maxSpeedMPS: 4
         )
         let storedURL = movedContainer ? PersistenceClientTests.movedContainerURL(of: fixture.fileURL) : fixture.fileURL
-        try await client.finalizeRide(rideId, base.addingTimeInterval(3), summary, storedURL)
+        try await client.finalizeRide(rideId, base.addingTimeInterval(3), summary, storedURL, true)
         return fixture
     }
 

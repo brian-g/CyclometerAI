@@ -27,11 +27,13 @@ struct PersistenceClient: Sendable {
     /// instead, which writes the same aggregates in the same atomic call.
     var updateRideSummary: @Sendable (RideSummaryUpdate) async throws -> Void
     /// Writes final aggregates, endedAt, recordingState .ended, and the exported
-    /// GPX file's URL (nil if export failed) in one call.
-    var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?) async throws -> Void
+    /// GPX file's URL (nil if export failed) in one call. The last argument is whether the ride
+    /// is owed its Apple Health workout: the rider's remembered Sync To choice (#631), so a kill
+    /// before S10 closes follows it. Closing S10 then sets or clears it (`setHealthWorkoutOwed`).
+    var finalizeRide: @Sendable (UUID, Date, RideSummaryUpdate, URL?, Bool) async throws -> Void
     /// `finalizeRide` for a ride closed out at launch with no ride-end marker: ended at the
     /// relaunch, no export, and never owed an Apple Health workout (#277), in the same one write.
-    /// A finalize and then a settle would leave it owed in between, where a Finish's backfill
+    /// A finalize and then a settle would leave it owed in between, where S10's closing backfill
     /// could write a workout spanning every hour since the kill (#606).
     var finalizeRideWithoutWorkout: @Sendable (UUID, Date, RideSummaryUpdate) async throws -> Void
     /// Sets a finished ride's title — S10's rename field (#249).
@@ -56,6 +58,9 @@ struct PersistenceClient: Sendable {
     var fetchRidesOwedHealthWorkout: @Sendable () async throws -> [OwedHealthWorkout]
     /// Marks a ride's workout as done with: written, or skipped as another source's duplicate.
     var settleRideHealthWorkout: @Sendable (UUID) async throws -> Void
+    /// Sets or clears a finished ride's Apple Health workout as owed: S10's Sync To row as the
+    /// rider left it when the sheet closed (#631).
+    var setHealthWorkoutOwed: @Sendable (UUID, Bool) async throws -> Void
     /// Finished rides still owed their finish stats, newest first — what
     /// `RideFinishStats.backfill` works through (#460).
     var fetchRidesOwedFinishStats: @Sendable () async throws -> [OwedFinishStats]
@@ -162,9 +167,11 @@ extension PersistenceClient: DependencyKey {
             fetchRideStats: { try await stores.rideActor.fetchRideStats(id: $0) },
             createRide: { try await stores.rideActor.createRide(id: $0, startedAt: $1, route: $2) },
             updateRideSummary: { try await stores.rideActor.updateRideSummary($0) },
-            finalizeRide: { id, endedAt, summary, gpxFileURL in
+            finalizeRide: { id, endedAt, summary, gpxFileURL, owesHealthWorkout in
                 try stores.retainExportIfHistoryUnavailable(gpxFileURL)
-                try await stores.rideActor.finalizeRide(id: id, endedAt: endedAt, summary: summary, gpxFileURL: gpxFileURL)
+                try await stores.rideActor.finalizeRide(
+                    id: id, endedAt: endedAt, summary: summary, gpxFileURL: gpxFileURL, owesHealthWorkout: owesHealthWorkout
+                )
             },
             finalizeRideWithoutWorkout: { id, endedAt, summary in
                 try await stores.rideActor.finalizeRide(
@@ -181,6 +188,7 @@ extension PersistenceClient: DependencyKey {
                 try await ridesWithTrackOnHand(try await stores.rideActor.ridesOwedHealthWorkout(), rideId: \.rideId, stores: stores)
             },
             settleRideHealthWorkout: { try await stores.rideActor.settleHealthWorkout(id: $0) },
+            setHealthWorkoutOwed: { try await stores.rideActor.setHealthWorkoutOwed(id: $0, owed: $1) },
             fetchRidesOwedFinishStats: {
                 try await ridesWithTrackOnHand(try await stores.rideActor.ridesOwedFinishStats(), rideId: \.rideId, stores: stores)
             },
@@ -247,7 +255,7 @@ extension PersistenceClient: DependencyKey {
         fetchRideStats: { _ in RideStats(averageSpeedMPS: 0, maxSpeedMPS: 0) },
         createRide: { _, _, _ in },
         updateRideSummary: { _ in },
-        finalizeRide: { _, _, _, _ in },
+        finalizeRide: { _, _, _, _, _ in },
         finalizeRideWithoutWorkout: { _, _, _ in },
         renameRide: { _, _ in },
         updateRideNotes: { _, _ in },
@@ -257,6 +265,7 @@ extension PersistenceClient: DependencyKey {
         fetchRideMapThumbnail: { _ in nil },
         fetchRidesOwedHealthWorkout: { [] },
         settleRideHealthWorkout: { _ in },
+        setHealthWorkoutOwed: { _, _ in },
         fetchRidesOwedFinishStats: { [] },
         saveRideFinishStats: { _, _ in },
         fetchRidesOwedSync: { [] },

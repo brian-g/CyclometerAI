@@ -5,9 +5,9 @@ import SwiftUI
 ///
 /// The Design.sketch S10 frame's structure — map, a grouped list, a floating button — carrying
 /// UX.md §S10's content: S15's Summary, led by distance and time (#645). The frame's Description
-/// row is the Notes field (#645). Its Bike and Sync To rows are not built: Sync is Phase 2, and
-/// there is no bike model. This view owns only the loading, which a snapshot must not run; the
-/// screen itself is `RideSummaryList`.
+/// row is the Notes field (#645). Sync To is the "S10 - Ride Summary Sync Options" frame's row
+/// of capsules (#631). Its Bike row is not built: there is no bike model. This view owns only the
+/// loading, which a snapshot must not run; the screen itself is `RideSummaryList`.
 struct RideSummaryView: View {
     @Bindable var store: StoreOf<RideSummaryFeature>
 
@@ -52,6 +52,11 @@ struct RideSummaryList<MapRow: View>: View {
             Section("Notes") {
                 TextField("Notes", text: $store.notes.sending(\.notesChanged), axis: .vertical)
                     .lineLimit(4...)
+            }
+            // On the page, not in a card, as the Sync Options frame draws it (#631).
+            Section("Sync To") {
+                SyncToCapsules(store: store)
+                    .listRowBackground(Color.clear)
             }
             switch store.load {
             case .waiting:
@@ -107,8 +112,8 @@ struct RideSummaryList<MapRow: View>: View {
         }
         .navigationTitle("Finish Ride")
         .navigationBarTitleDisplayMode(.inline)
-        // Not in the S10 frame (#452): the ride is already saved and in Health by now, so this is
-        // how a rider throws it away. Leading, away from Finish Ride, and behind an alert.
+        // Not in the S10 frame (#452): the ride is already saved by now, so this is how a rider
+        // throws it away. Leading, away from Finish Ride, and behind an alert.
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button(role: .destructive) {
@@ -134,6 +139,110 @@ struct RideSummaryList<MapRow: View>: View {
 
     private func unavailable(_ text: String) -> some View {
         Text(text).foregroundStyle(Color.cyTextSecondary)
+    }
+}
+
+/// Sync To's capsules (#631), in one row, or one per line when the row won't fit (a large text
+/// size, or several services).
+private struct SyncToCapsules: View {
+    let store: StoreOf<RideSummaryFeature>
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Spacing.sm) { capsules }
+            VStack(alignment: .leading, spacing: Spacing.sm) { capsules }
+        }
+    }
+
+    private var capsules: some View {
+        ForEach(store.syncRows) { row in
+            SyncToCapsule(row: row) {
+                store.send(.syncDestinationTapped(row.destination))
+            }
+        }
+    }
+}
+
+/// One destination: its mark and name, filled when chosen. `primaryDark` for every destination,
+/// not each service's brand color (UX §S10, #637); unchosen, outlined so it reads against the
+/// page. A service waiting on Reconnect shows the connection symbol in place of its mark,
+/// unfilled, and reconnects when tapped.
+private struct SyncToCapsule: View {
+    let row: RideSummaryFeature.SyncRow
+    let action: () -> Void
+
+    /// The mark's height: Strava's is an image, which doesn't size itself to the text as a symbol does.
+    @ScaledMetric(relativeTo: .subheadline) private var markHeight = Spacing.lg
+
+    /// `strava-mark.svg`'s glyph fills 512 of its viewBox's 640 points of height, so its frame is
+    /// that much taller for the glyph itself to be `markHeight`. Here rather than a cropped asset:
+    /// S12's Accounts row draws the same file at its own size.
+    private static let stravaMarkFrameScale: CGFloat = 640 / 512
+
+    var body: some View {
+        let isFilled = row.isChosen && !row.needsReconnect
+        Button(action: action) {
+            Label {
+                Text(row.destination.name)
+            } icon: {
+                mark.frame(height: row.destination == .service(.strava) && !row.needsReconnect
+                           ? markHeight * Self.stravaMarkFrameScale : markHeight)
+            }
+            .labelStyle(SyncToLabelStyle())
+            .font(.subheadline.weight(.medium))
+            .padding(Spacing.sm)
+            .foregroundStyle(isFilled ? Color.cyTextOnPrimary : Color.cyTextSecondary)
+            .background(isFilled ? Color.cyPrimaryDark : Color.cyBgTertiary, in: Capsule())
+            .overlay {
+                if !isFilled {
+                    Capsule().strokeBorder(Color.cyBorder, lineWidth: Spacing.strokeThin)
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isFilled ? .isSelected : [])
+        .accessibilityHint(row.needsReconnect ? "Reconnects your account" : "")
+    }
+
+    @ViewBuilder private var mark: some View {
+        if row.needsReconnect {
+            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
+        } else {
+            switch row.destination {
+            case .appleHealth:
+                Image(systemName: "figure.run")
+            case .service(.strava):
+                // Template-rendered, so it takes the capsule's color: no orange outside Strava's
+                // own assets (#629).
+                Image(.stravaMark).resizable().scaledToFit()
+            case .service:
+                Image(systemName: "arrow.up.circle")
+            }
+        }
+    }
+}
+
+/// The mark and name close together, as the frame spaces them.
+private struct SyncToLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: Spacing.xs) {
+            configuration.icon
+            configuration.title
+        }
+    }
+}
+
+private extension SyncDestination {
+    /// The capsule's name.
+    var name: LocalizedStringResource {
+        switch self {
+        case .appleHealth: "Apple Health"
+        case .service(.strava): "Strava"
+        case .service(.rideWithGPS): "Ride with GPS"
+        case .service(.tribosDotStudio): "tribos.studio"
+        case .service(.komoot): "Komoot"
+        }
     }
 }
 
@@ -180,6 +289,8 @@ private func previewList(
     notes: String = "",
     pairedSensors: [PairedSensor] = [],
     sensorHealth: [UUID: SensorHealthReport] = [:],
+    connectedServices: [ConnectedService] = [],
+    syncDestinationDefaults: [SyncDestination: Bool] = [:],
     rideId: UUID = UUID()
 ) -> some View {
     withDependencies {
@@ -189,6 +300,8 @@ private func previewList(
         $preferences.withLock {
             $0.pairedSensors = pairedSensors
             $0.sensorHealth = sensorHealth
+            $0.connectedServices = connectedServices
+            $0.syncDestinationDefaults = syncDestinationDefaults
         }
         var state = RideSummaryFeature.State(rideId: rideId)
         state.load = load
@@ -243,4 +356,19 @@ private func previewList(
         combo: SensorHealthReport(rideId: rideId, minBatteryPercent: 0, maxLinkLossesPerWindow: 43),
         radar: SensorHealthReport(rideId: rideId, minBatteryPercent: 70, maxLinkLossesPerWindow: 12)
     ], rideId: rideId)
+}
+
+private func previewStrava(isDisconnected: Bool = false) -> ConnectedService {
+    ConnectedService(serviceType: .strava, keychainIdentifier: "strava", athleteID: "1",
+                     grantedScopes: [StravaConfig.uploadScope], connectedAt: .now, isDisconnected: isDisconnected)
+}
+
+/// Strava connected, chosen as last time, and Apple Health left off last time (#631).
+#Preview("Ride Summary — Sync To") {
+    previewList(connectedServices: [previewStrava()], syncDestinationDefaults: [.appleHealth: false])
+}
+
+/// Strava revoked access: its capsule offers Reconnect (#631).
+#Preview("Ride Summary — Sync To reconnect") {
+    previewList(connectedServices: [previewStrava(isDisconnected: true)])
 }

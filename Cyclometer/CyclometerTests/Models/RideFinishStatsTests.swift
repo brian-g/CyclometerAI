@@ -192,7 +192,7 @@ struct RideFinishStatsTests {
         ]
         summary.finish = RideFinishStats(ascentMeters: 60, descentMeters: 0, activeKilocalories: 31,
                                          calorieSeries: series)
-        try await client.finalizeRide(rideId, Self.start.addingTimeInterval(180), summary, nil)
+        try await client.finalizeRide(rideId, Self.start.addingTimeInterval(180), summary, nil, true)
 
         await withDependencies {
             $0.persistenceClient = client

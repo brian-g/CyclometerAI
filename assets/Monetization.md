@@ -64,7 +64,7 @@ Nothing the rider set up during the trial is deleted. Everything returns the mom
 | Radar | Stays paired. The radar column (W7) shows a lock state with an unlock prompt. No radar alerts. |
 | AR glasses | Stay paired, no output. Lock shown in Settings → Sensors. |
 | Weather | The weather widget shows a lock state. No WeatherKit calls. |
-| Apple Health | No workout is written at ride end. The Apple Health row in Sync To (S10) shows a lock. Workouts written during the trial stay in Health. Each ride finished while Free with the rider's remembered Apple Health choice on is marked `isHealthWorkoutDeferred`, so it can be added later (§4.1). |
+| Apple Health | No workout is written when S10 closes. The Apple Health row in Sync To (S10) shows a lock. Workouts written during the trial stay in Health. Each ride finished while Free with the rider's remembered Apple Health choice on is marked `isHealthWorkoutDeferred`, so it can be added later (§4.1). |
 | Services | Accounts stay connected (tokens kept). Sync To in Ride Summary (S10) shows the services locked. No uploads. |
 
 ### 4.1 Apple Health backfill on unlock

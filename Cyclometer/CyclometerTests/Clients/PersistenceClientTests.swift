@@ -216,7 +216,7 @@ struct PersistenceClientTests {
         try await client.createRide(UUID(), Date(), nil)
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         try await client.updateRideSummary(update)
-        try await client.finalizeRide(UUID(), Date(), update, nil)
+        try await client.finalizeRide(UUID(), Date(), update, nil, true)
         try await client.appendVehiclePassEvents([VehiclePassEventDTO(
             rideId: UUID(), timestamp: Date(), latitude: 0, longitude: 0,
             alertLevelAtPass: .clear, riderSpeedKph: 0, estimatedPassSpeedKph: nil
@@ -249,7 +249,7 @@ struct PersistenceClientTests {
             onFlush: { flushed.setValue($0) },
             onCreateRide: { createdRide.setValue(($0, $1, $2)) },
             onUpdateRideSummary: { updatedSummary.setValue($0) },
-            onFinalizeRide: { finalizedRide.setValue(($0, $1, $2, $3)) },
+            onFinalizeRide: { id, endedAt, summary, url, _ in finalizedRide.setValue((id, endedAt, summary, url)) },
             onAppendVehiclePassEvents: { appendedPassEvents.setValue($0) }
         )
 
@@ -276,7 +276,7 @@ struct PersistenceClientTests {
 
         let endedAt = Date()
         let gpxURL = URL(string: "file:///tmp/scripted.gpx")!
-        try await client.finalizeRide(rideId, endedAt, summary, gpxURL)
+        try await client.finalizeRide(rideId, endedAt, summary, gpxURL, true)
         #expect(finalizedRide.value?.0 == rideId)
         #expect(finalizedRide.value?.1 == endedAt)
         #expect(finalizedRide.value?.2 == summary)
@@ -403,7 +403,7 @@ struct PersistenceClientTests {
 
         let endedAt = Date()
         let gpxURL = URL(string: "file:///tmp/ride.gpx")!
-        try await client.finalizeRide(rideId, endedAt, update, gpxURL)
+        try await client.finalizeRide(rideId, endedAt, update, gpxURL, true)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.endedAt == endedAt)
@@ -424,7 +424,7 @@ struct PersistenceClientTests {
             durationSeconds: 900, distanceMeters: 5_000, averageSpeedMPS: 5, maxSpeedMPS: 10
         )
 
-        try await client.finalizeRide(rideId, Date(), update, nil)
+        try await client.finalizeRide(rideId, Date(), update, nil, true)
 
         let ride = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(ride.recordingState == .ended)
@@ -435,7 +435,7 @@ struct PersistenceClientTests {
         let (client, _) = Self.makeLiveClient()
         let update = RideSummaryUpdate(rideId: UUID(), durationSeconds: 0, distanceMeters: 0, averageSpeedMPS: 0, maxSpeedMPS: 0)
         await #expect(throws: PersistenceError.rideNotFound) {
-            try await client.finalizeRide(UUID(), Date(), update, nil)
+            try await client.finalizeRide(UUID(), Date(), update, nil, true)
         }
     }
 
@@ -477,7 +477,7 @@ struct PersistenceClientTests {
             try await client.createRide(id, base.addingTimeInterval(TimeInterval(offset) * 3_600), nil)
         }
         for id in [older, newer, captured] {
-            try await client.finalizeRide(id, base.addingTimeInterval(86_400), update(id), nil)
+            try await client.finalizeRide(id, base.addingTimeInterval(86_400), update(id), nil, true)
         }
         try await client.saveRideMapThumbnail(captured, Data([1]), Data([2]))
 
@@ -500,12 +500,33 @@ struct PersistenceClientTests {
         try await client.finalizeRide(finished, endedAt, RideSummaryUpdate(
             rideId: finished, recordingState: .ended,
             durationSeconds: 3_300, distanceMeters: 21_000, averageSpeedMPS: 6.4, maxSpeedMPS: 11
-        ), nil)
+        ), nil, true)
 
         #expect(try await client.fetchRidesOwedHealthWorkout() == [OwedHealthWorkout(
             rideId: finished, startedAt: startedAt, endedAt: endedAt,
             distanceMeters: 21_000, movingSeconds: 3_300
         )])
+    }
+
+    /// #631: the remembered Sync To choice decides the finalize, and S10's close can change it.
+    @Test("finalizeRide with Apple Health off leaves the ride not owed; setHealthWorkoutOwed sets and clears it")
+    func healthWorkoutOwedFollowsTheChoice() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let startedAt = Date(timeIntervalSince1970: 1_000_000)
+        let rideId = UUID()
+        try await client.createRide(rideId, startedAt, nil)
+
+        try await client.finalizeRide(rideId, startedAt.addingTimeInterval(3_600), RideSummaryUpdate(
+            rideId: rideId, recordingState: .ended,
+            durationSeconds: 3_300, distanceMeters: 21_000, averageSpeedMPS: 6.4, maxSpeedMPS: 11
+        ), nil, false)
+        #expect(try await client.fetchRidesOwedHealthWorkout().isEmpty)
+
+        try await client.setHealthWorkoutOwed(rideId, true)
+        #expect(try await client.fetchRidesOwedHealthWorkout().map(\.rideId) == [rideId])
+
+        try await client.setHealthWorkoutOwed(rideId, false)
+        #expect(try await client.fetchRidesOwedHealthWorkout().isEmpty)
     }
 
     /// #606: a launch close-out with no ride-end marker is ended and never owed its workout in
@@ -545,7 +566,7 @@ struct PersistenceClientTests {
             try await client.finalizeRide(id, base.addingTimeInterval(86_400), RideSummaryUpdate(
                 rideId: id, recordingState: .ended,
                 durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 2, maxSpeedMPS: 3
-            ), nil)
+            ), nil, true)
         }
 
         try await client.settleRideHealthWorkout(settled)
@@ -589,7 +610,7 @@ struct PersistenceClientTests {
             try await client.finalizeRide(id, base.addingTimeInterval(86_400), RideSummaryUpdate(
                 rideId: id, recordingState: .ended,
                 durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 2, maxSpeedMPS: 3
-            ), nil)
+            ), nil, true)
         }
         try await client.createRide(inProgress, base, nil)
 
@@ -676,12 +697,12 @@ struct PersistenceClientTests {
         try await client.finalizeRide(withSensors, endedAt, RideSummaryUpdate(
             rideId: withSensors, durationSeconds: 120, distanceMeters: 500, averageSpeedMPS: 4, maxSpeedMPS: 9,
             averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3
-        ), nil)
+        ), nil, true)
         let withoutSensors = UUID()
         try await client.createRide(withoutSensors, Date(), nil)
         try await client.finalizeRide(withoutSensors, endedAt, RideSummaryUpdate(
             rideId: withoutSensors, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
-        ), nil)
+        ), nil, true)
 
         // A real 0 rpm average must survive as 0, not collapse into "no sensor". Finalized without
         // finish stats, both are owed them, as S10 reads (#650).
@@ -738,7 +759,7 @@ struct PersistenceClientTests {
 
         var finish = checkpoint
         finish.recordingState = .ended
-        try await client.finalizeRide(rideId, start.addingTimeInterval(700), finish, nil)
+        try await client.finalizeRide(rideId, start.addingTimeInterval(700), finish, nil, true)
         #expect(try await client.fetchRideStats(rideId).pauses == [closed, open])
     }
 
@@ -776,7 +797,7 @@ struct PersistenceClientTests {
 
         var finish = checkpoint
         finish.recordingState = .ended
-        try await client.finalizeRide(rideId, start.addingTimeInterval(1_000), finish, nil)
+        try await client.finalizeRide(rideId, start.addingTimeInterval(1_000), finish, nil, true)
         let finished = try Self.fetchRide(rideId, from: swiftDataStack)
         #expect(finished.weatherData == storedWeather)
         #expect(finished.pausesData == storedPauses)
@@ -846,7 +867,7 @@ struct PersistenceClientTests {
         try await client.createRide(rideId, Date(), nil)
         try await client.finalizeRide(rideId, Date(), RideSummaryUpdate(
             rideId: rideId, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
-        ), storing(url))
+        ), storing(url), true)
 
         #expect(try await client.fetchRideStats(rideId).gpxFileURL == url)
         // Deleted from Files.
@@ -894,7 +915,7 @@ struct PersistenceClientTests {
             averageHeartRateBPM: 142, maxHeartRateBPM: 171
         )
         summary.finish = RideFinishStats(ascentMeters: 412, descentMeters: 398, activeKilocalories: 845)
-        try await client.finalizeRide(rideId, Date(), summary, nil)
+        try await client.finalizeRide(rideId, Date(), summary, nil, true)
 
         #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
         let stats = try await client.fetchRideStats(rideId)
@@ -914,7 +935,7 @@ struct PersistenceClientTests {
                                         averageSpeedMPS: 3, maxSpeedMPS: 5)
         summary.finish = RideFinishStats(ascentMeters: nil, descentMeters: nil, activeKilocalories: nil)
         let endedAt = Date(timeIntervalSince1970: 1_700_000_000)
-        try await client.finalizeRide(rideId, endedAt, summary, nil)
+        try await client.finalizeRide(rideId, endedAt, summary, nil, true)
 
         // Nil is a result, not "still to work out": the ride isn't owed a backfill.
         #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
@@ -935,7 +956,7 @@ struct PersistenceClientTests {
 
         try await client.finalizeRide(closedOut, startedAt.addingTimeInterval(3_600), RideSummaryUpdate(
             rideId: closedOut, durationSeconds: 3_300, distanceMeters: 21_000, averageSpeedMPS: 6.4, maxSpeedMPS: 11
-        ), nil)
+        ), nil, true)
 
         // The in-progress ride isn't listed: only a finished ride is owed.
         #expect(try await client.fetchRidesOwedFinishStats() == [OwedFinishStats(
@@ -962,7 +983,7 @@ struct PersistenceClientTests {
         try await client.createRide(id, Date(), nil)
         try await client.finalizeRide(id, Date(), RideSummaryUpdate(
             rideId: id, durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
-        ), nil)
+        ), nil, true)
 
         try await client.renameRide(id, "Morning Loop")
 
@@ -1000,7 +1021,7 @@ struct PersistenceClientTests {
             rideId: endedId, recordingState: .ended,
             durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
         )
-        try await client.finalizeRide(endedId, base.addingTimeInterval(120), finishUpdate, nil)
+        try await client.finalizeRide(endedId, base.addingTimeInterval(120), finishUpdate, nil, true)
 
         let context = ModelContext(swiftDataStack.container)
         let ended = Ride.RecordingState.ended
@@ -1030,7 +1051,7 @@ struct PersistenceClientTests {
             rideId: endedId, recordingState: .ended,
             durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
         )
-        try await client.finalizeRide(endedId, base.addingTimeInterval(180), finishUpdate, nil)
+        try await client.finalizeRide(endedId, base.addingTimeInterval(180), finishUpdate, nil, true)
 
         let context = ModelContext(swiftDataStack.container)
         let descriptor = FetchDescriptor<Ride>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
@@ -1091,7 +1112,7 @@ struct PersistenceClientTests {
             rideId: rideId, recordingState: .ended,
             durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
         )
-        try await client.finalizeRide(rideId, Date(), finishUpdate, nil)
+        try await client.finalizeRide(rideId, Date(), finishUpdate, nil, true)
 
         #expect(try await client.fetchResumableRide() == nil)
     }
@@ -1108,7 +1129,7 @@ struct PersistenceClientTests {
             rideId: endedId, recordingState: .ended,
             durationSeconds: 60, distanceMeters: 200, averageSpeedMPS: 3, maxSpeedMPS: 5
         )
-        try await client.finalizeRide(endedId, base.addingTimeInterval(60), finishUpdate, nil)
+        try await client.finalizeRide(endedId, base.addingTimeInterval(60), finishUpdate, nil, true)
 
         try await client.createRide(activeId, base.addingTimeInterval(120), nil)
         let checkpoint = RideSummaryUpdate(
@@ -1156,7 +1177,7 @@ struct PersistenceClientTests {
                 durationSeconds: 3_600, distanceMeters: 42_000,
                 averageSpeedMPS: 6, maxSpeedMPS: 12
             )
-            try await client.finalizeRide(id, endedAt, summary, nil)
+            try await client.finalizeRide(id, endedAt, summary, nil, true)
         }
         // stillRiding is left un-finalized, the canary for the endedAt-proxy filter.
 

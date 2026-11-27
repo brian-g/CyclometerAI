@@ -4,15 +4,18 @@ import Testing
 @testable import Cyclometer
 
 /// S10 at the ride-end seam (#249): Finish presents it for the ride just ended, and dismissing it
-/// — by its button or a swipe — saves the name.
+/// — by its button or a swipe — saves the name, and commits Sync To (#631).
 @MainActor
 @Suite("Ride Summary presentation")
 struct RideSummaryPresentationTests {
 
     private static let rideId = UUID(uuidString: "00000000-0000-0000-0000-000000000249")!
 
+    /// `state` is built inside the store's file storage, after `seed`, so the S10 it carries reads
+    /// the seeded preferences.
     private func makeStore(
-        _ state: AppFeature.State = AppFeature.State(),
+        _ state: @autoclosure () -> AppFeature.State = AppFeature.State(),
+        seed: (inout AppPreferences) -> Void = { _ in },
         persistenceClient: PersistenceClient,
         healthKitClient: HealthKitClient = .testValue
     ) -> TestStoreOf<AppFeature> {
@@ -20,7 +23,9 @@ struct RideSummaryPresentationTests {
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
-            TestStore(initialState: state) {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock(seed)
+            return TestStore(initialState: state()) {
                 AppFeature()
             } withDependencies: {
                 $0.continuousClock = TestClock()
@@ -121,6 +126,7 @@ struct RideSummaryPresentationTests {
         let store = makeStore(presenting(title: "Hill Repeats"), persistenceClient: client)
 
         await store.send(.rideSummary(.dismiss)) {
+            $0.rideSummary?.$preferences.withLock { $0.syncDestinationDefaults = [.appleHealth: true] }
             $0.rideSummary = nil
         }
         await store.finish()
@@ -151,8 +157,10 @@ struct RideSummaryPresentationTests {
         ))
 
         await store.send(.rideSummary(.dismiss)) {
+            $0.rideSummary?.$preferences.withLock { $0.syncDestinationDefaults = [.appleHealth: true] }
             $0.rideSummary = nil
         }
+        await store.finish()
         #expect(renamed.value == 0)
     }
 
@@ -169,6 +177,7 @@ struct RideSummaryPresentationTests {
         ))
 
         await store.send(.rideSummary(.dismiss)) {
+            $0.rideSummary?.$preferences.withLock { $0.syncDestinationDefaults = [.appleHealth: true] }
             $0.rideSummary = nil
         }
         await store.finish()
@@ -197,9 +206,10 @@ struct RideSummaryPresentationTests {
     }
 
     /// A rename typed before deleting must not be written to a ride that's going (#452).
-    @Test("confirming Delete closes S10 without a rename and deletes the ride and its workout through S14")
+    @Test("confirming Delete closes S10 without a rename or Sync To, and deletes the ride and its workout through S14")
     func confirmedDeleteDeletesRide() async {
         let renamed = LockIsolated(0)
+        let owedSet = LockIsolated(0)
         let deleted = LockIsolated<[String]>([])
         var state = presenting(title: "Hill Repeats")
         state.rideSummary?.alert = RideSummaryFeature.deleteAlert
@@ -207,6 +217,7 @@ struct RideSummaryPresentationTests {
             state,
             persistenceClient: .mock(
                 onRenameRide: { _, _ in renamed.withValue { $0 += 1 } },
+                onSetHealthWorkoutOwed: { _, _ in owedSet.withValue { $0 += 1 } },
                 onDeleteRide: { id in deleted.withValue { $0.append("ride \(id)") } }
             ),
             healthKitClient: .mock(onDeleteWorkout: { id in deleted.withValue { $0.append("workout \(id)") } })
@@ -221,6 +232,186 @@ struct RideSummaryPresentationTests {
         await store.finish()
 
         #expect(renamed.value == 0)
+        #expect(owedSet.value == 0)
+        #expect(store.state.preferences.syncDestinationDefaults.isEmpty)
         #expect(deleted.value == ["workout \(Self.rideId)", "ride \(Self.rideId)"])
+    }
+
+    // MARK: - Sync To (#631)
+
+    private static let stravaNoUploadScope = ConnectedService(
+        serviceType: .strava, keychainIdentifier: "strava", athleteID: "1",
+        grantedScopes: ["read"], connectedAt: Date(timeIntervalSince1970: 0)
+    )
+
+    private static let owedRide = OwedHealthWorkout(
+        rideId: rideId, startedAt: Date(timeIntervalSince1970: 1_000_000),
+        endedAt: Date(timeIntervalSince1970: 1_003_600), distanceMeters: 20_000, movingSeconds: 3_500
+    )
+
+    @Test("closing S10 with Apple Health on marks the ride owed, writes its workout, and remembers the choice")
+    func healthOnAtClose() async {
+        let owed = LockIsolated<[(UUID, Bool)]>([])
+        let written = LockIsolated<[UUID]>([])
+        let store = makeStore(
+            presenting(title: "Morning Loop", persistedTitle: "Morning Loop"),
+            persistenceClient: .mock(
+                ridesOwedHealthWorkout: [Self.owedRide],
+                onSetHealthWorkoutOwed: { id, isOwed in owed.withValue { $0.append((id, isOwed)) } }
+            ),
+            healthKitClient: .mock(onSaveWorkout: { workout in written.withValue { $0.append(workout.rideId) } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.dismiss))
+        await store.finish()
+
+        #expect(owed.value.map(\.0) == [Self.rideId])
+        #expect(owed.value.map(\.1) == [true])
+        #expect(written.value == [Self.rideId])
+        #expect(store.state.preferences.syncDestinationDefaults == [.appleHealth: true])
+    }
+
+    @Test("closing S10 with Apple Health turned off clears the ride, writes no workout, and remembers off")
+    func healthOffAtClose() async {
+        let owed = LockIsolated<[Bool]>([])
+        let written = LockIsolated(0)
+        // Computed, so it's built in the store's file storage (see `makeStore`).
+        var state: AppFeature.State {
+            var state = presenting(title: "Morning Loop", persistedTitle: "Morning Loop")
+            state.rideSummary?.syncToggles[.appleHealth] = false
+            return state
+        }
+        let store = makeStore(
+            state,
+            persistenceClient: .mock(onSetHealthWorkoutOwed: { _, isOwed in owed.withValue { $0.append(isOwed) } }),
+            healthKitClient: .mock(onSaveWorkout: { _ in written.withValue { $0 += 1 } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.dismiss))
+        await store.finish()
+
+        #expect(owed.value == [false])
+        #expect(written.value == 0)
+        #expect(store.state.preferences.syncDestinationDefaults == [.appleHealth: false])
+    }
+
+    /// A swipe-down is a bare `.dismiss`; Finish Ride sends `finishTapped` first. Both commit.
+    @Test("Finish Ride commits Sync To as a swipe does")
+    func finishButtonCommitsSyncTo() async {
+        let owed = LockIsolated<[Bool]>([])
+        let store = makeStore(
+            presenting(title: "Morning Loop", persistedTitle: "Morning Loop"),
+            persistenceClient: .mock(onSetHealthWorkoutOwed: { _, isOwed in owed.withValue { $0.append(isOwed) } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.presented(.finishTapped)))
+        await store.receive(\.rideSummary.dismiss)
+        await store.finish()
+
+        #expect(owed.value == [true])
+    }
+
+    @Test("with Strava chosen, the ride is queued after the rename lands, so the upload carries the new name")
+    func stravaQueuedAfterRename() async {
+        let records = LockIsolated<[UUID]>([])
+        let store = makeStore(
+            presenting(title: "Hill Repeats"),
+            seed: { $0.connectedServices = [Self.stravaNoUploadScope] },
+            persistenceClient: .mock(onSaveSyncRecord: { id, _ in records.withValue { $0.append(id) } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.dismiss))
+        // Not exhaustive, so a `receive` skips what came before it: the enqueue after the reload
+        // proves the order.
+        await store.receive(\.rides.reloadRides)
+        await store.receive(\.syncQueue.enqueue)
+        await store.finish()
+
+        // Without the upload scope the queue writes it waiting rather than uploading (#630).
+        #expect(records.value == [Self.rideId])
+        #expect(store.state.preferences.syncDestinationDefaults == [.appleHealth: true, .service(.strava): true])
+    }
+
+    @Test("with Strava turned off, nothing is queued, and off is remembered")
+    func stravaOffNotQueued() async {
+        let records = LockIsolated(0)
+        var state: AppFeature.State {
+            var state = presenting(title: "Morning Loop", persistedTitle: "Morning Loop")
+            state.rideSummary?.syncToggles[.service(.strava)] = false
+            return state
+        }
+        let store = makeStore(
+            state,
+            seed: { $0.connectedServices = [Self.stravaNoUploadScope] },
+            persistenceClient: .mock(onSaveSyncRecord: { _, _ in records.withValue { $0 += 1 } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.dismiss))
+        await store.finish()
+
+        #expect(records.value == 0)
+        #expect(store.state.preferences.syncDestinationDefaults == [.appleHealth: true, .service(.strava): false])
+    }
+
+    @Test("a Strava account waiting on Reconnect isn't queued, and its remembered choice is kept")
+    func disconnectedStravaKeepsChoice() async {
+        let records = LockIsolated(0)
+        var disconnected = Self.stravaNoUploadScope
+        disconnected.isDisconnected = true
+        let store = makeStore(
+            presenting(title: "Morning Loop", persistedTitle: "Morning Loop"),
+            seed: {
+                $0.connectedServices = [disconnected]
+                $0.syncDestinationDefaults = [.service(.strava): true]
+            },
+            persistenceClient: .mock(onSaveSyncRecord: { _, _ in records.withValue { $0 += 1 } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.dismiss))
+        await store.finish()
+
+        #expect(records.value == 0)
+        #expect(store.state.preferences.syncDestinationDefaults == [.appleHealth: true, .service(.strava): true])
+    }
+
+    @Test("closing before the ride's finalize lands waits for it, then commits")
+    func closeBeforeFinalizeWaits() async {
+        let owed = LockIsolated<[Bool]>([])
+        var state: AppFeature.State {
+            var state = presenting(title: "Morning Loop", persistedTitle: "Morning Loop")
+            state.rideSummary?.load = .waiting
+            return state
+        }
+        let store = makeStore(
+            state,
+            persistenceClient: .mock(
+                // Finalized by the time it's read: `fetchRides` lists only ended rides.
+                rides: [RideListSummary(id: Self.rideId, title: "Morning Loop", startedAt: .now,
+                                        distanceMeters: 1_000, durationSeconds: 300)],
+                onSetHealthWorkoutOwed: { _, isOwed in owed.withValue { $0.append(isOwed) } }
+            )
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.dismiss))
+        await store.finish()
+
+        #expect(owed.value == [true])
+    }
+
+    @Test("a Reconnect from Sync To resumes the upload queue")
+    func reconnectResumesQueue() async {
+        let store = makeStore(presenting(title: "Morning Loop"), persistenceClient: .mock())
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.presented(.delegate(.serviceConnected))))
+        await store.receive(\.syncQueue.resume)
+        await store.finish()
     }
 }

@@ -2,6 +2,7 @@
 **Version:** 1.2  
 **Date:** 2026-05-21  
 **Updated:** 2026-05-22 - HKWorkout write at ride end; SyncClient + RideSummaryFeature spec; service sync from S10  
+**Updated:** 2026-11-27 - §4.13 rewritten as built (#631): S10's Sync To, the close that commits it, no HKWorkout write at Finish  
 **Updated:** 2026-11-21 - Strava (Phase 2, PRD §8.12): new §4.15 `KeychainClient`, `StravaAuthClient`, `StravaClient`, `AccountsFeature`, `SyncQueueFeature`, `StravaRoutesFeature`; S10's Sync To replaces `RideSyncSheetFeature`  
 **Updated:** 2026-09-30 - §3 and §8 rewritten to match the implemented tree (#339, #342)  
 **Updated:** 2026-10-09 - `AltimeterClient` and `LocationUpdate.verticalAccuracy` (#387)  
@@ -686,101 +687,47 @@ struct VehicleTrackingRecord: Equatable {
 
 ### 4.13 RideSummaryFeature
 
-Presented after ride end. Displays post-ride metrics and drives service sync.
+S10, presented by `AppFeature` after ride end (#249). Shows the finished ride, edits its name and notes, and chooses its destinations in Sync To (#631). **As built:** `Features/Rides/RideSummaryFeature.swift`.
 
 ```swift
 @Reducer
 struct RideSummaryFeature {
     @ObservableState
     struct State: Equatable {
-        var ride: Ride
-        var isShowingSyncSheet: Bool = false
-        var syncSheet: RideSyncSheetFeature.State?
-
-        // HKWorkout write fires when S10 closes, only with Sync To's Apple Health on; status tracked here
-        var healthKitWorkoutStatus: WorkoutWriteStatus = .pending
+        @Shared(.appPreferences) var preferences   // connected services, remembered Sync To choices
+        let rideId: UUID
+        var load: Load = .waiting                  // waits for the ride's finalize
+        var title, notes: String                   // saved by AppFeature as the sheet closes
+        var syncToggles: [SyncDestination: Bool]   // changed on this sheet; else the remembered choice
+        var isReconnecting: Bool
+        var syncRows: [SyncRow] { get }            // Apple Health, then each service with an account
+        var syncChoices: [SyncDestination: Bool] { get }  // what closing commits; not a service waiting on Reconnect
+        // …summary, stats, track, alert
     }
 
     enum Action {
-        case onAppear                              // Triggers HKWorkout write if not yet done
-        case healthKitWorkoutWriteCompleted(Result<Void, Error>)
-        case syncButtonTapped                      // Opens service selection sheet
-        case syncSheet(RideSyncSheetFeature.Action)
-        case doneTapped                            // Dismisses summary; returns to Rides tab
+        case task, loaded(Loaded), titleChanged(String), notesChanged(String)
+        case syncDestinationTapped(SyncDestination)        // toggles, or reconnects a disconnected service
+        case reconnectFinished(StravaConnectOutcome)
+        case finishTapped, deleteTapped
+        case delegate(Delegate)                            // .deleteRide, .serviceConnected
+        // …
     }
-
-    @Dependency(\.healthKit) var healthKit
-}
-
-enum WorkoutWriteStatus: Equatable {
-    case pending, writing, written, failed(String)
-}
-
-// MARK: - RideSyncSheetFeature
-
-/// Sheet presented when rider taps Sync. Shows connected services as toggleable options.
-/// Phase 2 — not implemented in MVP; architecture defined here for planning.
-@Reducer
-struct RideSyncSheetFeature {
-    @ObservableState
-    struct State: Equatable {
-        var rideId: UUID
-        var availableServices: [ExternalService] = []
-        var selectedServices: Set<ExternalService> = []
-        var syncStatuses: [ExternalService: ServiceSyncStatus] = [:]
-        var isSyncing: Bool = false
-    }
-
-    enum Action {
-        case onAppear
-        case servicesLoaded([ExternalService])
-        case serviceToggled(ExternalService)
-        case syncConfirmed                         // Upload to all selected services
-        case serviceUploadCompleted(ExternalService, Result<String, Error>)
-        case dismissed
-    }
-
-    @Dependency(\.sync) var sync
-}
-
-enum ServiceSyncStatus: Equatable {
-    case idle, uploading, synced(remoteId: String), failed(String)
 }
 ```
 
-**HKWorkout write flow:**
+**Closing S10** (Finish Ride or a swipe, both `AppFeature`'s `.rideSummary(.dismiss)`, which runs while the child's state is still there; the child's own effects are cancelled as it goes, so nothing here runs in them):
 ```
-RideSummaryFeature.reduce(.finishTapped / .dismissed)
+merge syncChoices into AppPreferences.syncDestinationDefaults   // at once, before the finalize can read Health's
     │
-    │ guard syncDestinations[.appleHealth] == true, healthKitWorkoutStatus == .pending
-    ▼
-HealthKitClient.recordWorkout(HKWorkoutPayload(
-    startDate: ride.startedAt,
-    endDate:   ride.endedAt,
-    distanceMeters: ride.distanceMeters,
-    activeEnergyBurnedKcal: nil          // Phase 2 via HKQuantitySample
-))
-    │
-    ▼
-.healthKitWorkoutWriteCompleted(.success)  // Ride appears in iOS Fitness app
+    ▼ effect, in AppFeature
+notes → rename → reload S14 → GPX rewrite         // when changed
+wait for the ride's finalize, unless S10 had already loaded
+Strava chosen  → SyncQueueFeature.enqueue(rideId)  // after the name and notes: the upload reads them
+PersistenceClient.setHealthWorkoutOwed(rideId, appleHealthChosen)
+RideHealthWorkout.backfill()                       // writes it if owed, and retries older rides (#277)
 ```
-
-**Service sync flow (Phase 2):**
-```
-RideSummaryFeature.reduce(.syncButtonTapped)
-    │ → present RideSyncSheetFeature
-    │
-SyncClient.availableServices()
-    │ → [.strava, .rideWithGPS]  (enabled services with valid tokens)
-    │
-Rider selects services → taps "Sync"
-    │
-For each selected service:
-    SyncClient.uploadRide(rideId, service)
-    → POST GPX to service API
-    → Returns remoteActivityId on success
-    → Updates Ride.syncRecords in SwiftData
-```
+`finalizeRide` takes the remembered Apple Health choice (`AppPreferences.isSyncChosen(.appleHealth)`), read as it writes, so a ride whose S10 never closes follows it. A Finish writes no workout. Delete nils the sheet without `.dismiss`, so nothing is committed. A Reconnect from a capsule runs `StravaAuthClient.connectOutcome()`, as S12.1 does, and its `.serviceConnected` delegate resumes the queue. `RideSyncSheetFeature`, which an earlier version of this section specified, is retired: Sync To replaced it before it was built.
 
 ---
 
@@ -952,8 +899,8 @@ documented, and the browser (#634) picks the rides. Reducers use `StravaClient.m
 | Feature | Scope | Does |
 |---|---|---|
 | `AccountsFeature` | `SettingsFeature` | S12 Accounts rows and S12.1: connect, disconnect, granted scopes. S12.1's `.task` fetches `athlete` each time it appears, for the name and photo, and stores neither: the photo loads through a session with no URL cache, so it never reaches the disk; a disconnected account shows as not connected. **As built (#629):** S12.1 alone, pushed on `SettingsFeature.path` (`NavigationLink(state:)`); the Strava row reads `SettingsFeature.State.stravaNeedsReconnect`. Connect and Reconnect are one `stravaAuth.connect()`. Disconnect is confirmed in S12.1, which sends `delegate(.disconnectConfirmed)`; `SettingsFeature` pops it and runs `stravaAuth.disconnect()`, since the client removes the record before its revoke answers and the revoke must outlive the screen. `StravaSession` runs a disconnect in an unstructured task that a connect's code exchange waits out (Strava's deauthorize revokes every token for the athlete, so an exchange that beat it would be killed), and finishes a connect in one once Strava has redirected back, so leaving S12.1 doesn't lose a finished sign-in. The photo loads through `AsyncImage` with `asyncImageURLSession` on an ephemeral session with no `urlCache` |
-| `SyncQueueFeature` | `AppFeature` (app-lifetime) | Runs uploads after S10 closes: upload, poll `uploadStatus` (1, 2, 4, then 8 s, for 2 min), write `RideSyncRecord`. On launch resumes records left `pending` or `processing`. **As built (#630):** `Features/Rides/SyncQueueFeature.swift`. `enqueue(rideId)` is the rider's choice, and reads the ride's record first (`PersistenceClient.fetchSyncRecord`): a ride already `synced` is skipped, because Strava doesn't catch the same GPX sent twice and would make a second activity; an owed record carries on from where it stands; a `failed` one starts over; `resume` reads `PersistenceClient.fetchRidesOwedSync` and runs on each `.active` scene phase while `AppPreferences.canUploadToStrava` (the launch's first included; not from `.task`, whose `finish()` would cancel an upload) and when S12.1's connect or Reconnect finishes (`AccountsFeature` delegate `.connected`, forwarded as `SettingsFeature` delegate `.stravaConnected`: `StravaSession` writes the record outside any reducer, where `.onChange` can't see it). It sends the owed rides one at a time, oldest first, each from its record as re-read once in flight (a ride settled since the fetch isn't sent again), and stops at a 429. Nothing calls Strava without a connected account holding `activity:write`, or before a 429's reset (`heldUntil`, saved in its own file, `.stravaUploadsHeldUntil`, so a relaunch inside the window stays held): the record waits `pending` with its reason. Each job reports a `JobOutcome`, and what waits is tried again without waiting for `.active`: a 429 resumes the queue a second after it resets; what passes by itself (offline, 5xx, still processing, a lost upload) sets one backoff resume, 30 s, then 1, 2, 5 and 10 min, then every 15 min, which starts over once a ride settles; a missing account or scope sets none, because the reconnect resumes the queue. Each step is written before the next: `uploading`, then `processing` with `RideSyncRecord.remoteUploadId`, then `synced` (`.ready` or `.duplicate`, with the activity id) or `failed` (Strava's reason). Two minutes still processing keeps `processing` and its upload id, polled again at the next `resume`; a record found `uploading` uploads again, which can make a second activity if the earlier POST landed but its reply was lost (#663). `SyncFailure` sorts errors: offline, 5xx, 429, a missing account or scope wait (record keeps its place, reason in `errorMessage`); a poll answered 404 drops the upload id to send again; other 4xx and an unreadable answer fail, for Retry (#632). `Ride.isSyncOwed` mirrors "any record pending, uploading or processing" so the resume can use a predicate; `saveSyncRecord` writes both together. A DEBUG-only "Upload Latest Ride" long-press menu on S12.1's athlete card enqueues the newest ride until #631's Sync To replaces it |
-| `RideSummaryFeature` | — | Gains `syncDestinations: [SyncDestination: Bool]` for S10's Sync To; `.task` loads the defaults; `.finishTapped` and dismissal save them and send the chosen services to `SyncQueueFeature`. Health is a destination like the services: on, the close sets `isHealthWorkoutOwed` and writes the workout; off, it clears the flag and nothing is written. No write at save. `RideSyncSheetFeature` is retired |
+| `SyncQueueFeature` | `AppFeature` (app-lifetime) | Runs uploads after S10 closes: upload, poll `uploadStatus` (1, 2, 4, then 8 s, for 2 min), write `RideSyncRecord`. On launch resumes records left `pending` or `processing`. **As built (#630):** `Features/Rides/SyncQueueFeature.swift`. `enqueue(rideId)` is the rider's choice, and reads the ride's record first (`PersistenceClient.fetchSyncRecord`): a ride already `synced` is skipped, because Strava doesn't catch the same GPX sent twice and would make a second activity; an owed record carries on from where it stands; a `failed` one starts over; `resume` reads `PersistenceClient.fetchRidesOwedSync` and runs on each `.active` scene phase while `AppPreferences.canUploadToStrava` (the launch's first included; not from `.task`, whose `finish()` would cancel an upload) and when S12.1's connect or Reconnect finishes (`AccountsFeature` delegate `.connected`, forwarded as `SettingsFeature` delegate `.stravaConnected`: `StravaSession` writes the record outside any reducer, where `.onChange` can't see it). It sends the owed rides one at a time, oldest first, each from its record as re-read once in flight (a ride settled since the fetch isn't sent again), and stops at a 429. Nothing calls Strava without a connected account holding `activity:write`, or before a 429's reset (`heldUntil`, saved in its own file, `.stravaUploadsHeldUntil`, so a relaunch inside the window stays held): the record waits `pending` with its reason. Each job reports a `JobOutcome`, and what waits is tried again without waiting for `.active`: a 429 resumes the queue a second after it resets; what passes by itself (offline, 5xx, still processing, a lost upload) sets one backoff resume, 30 s, then 1, 2, 5 and 10 min, then every 15 min, which starts over once a ride settles; a missing account or scope sets none, because the reconnect resumes the queue. Each step is written before the next: `uploading`, then `processing` with `RideSyncRecord.remoteUploadId`, then `synced` (`.ready` or `.duplicate`, with the activity id) or `failed` (Strava's reason). Two minutes still processing keeps `processing` and its upload id, polled again at the next `resume`; a record found `uploading` uploads again, which can make a second activity if the earlier POST landed but its reply was lost (#663). `SyncFailure` sorts errors: offline, 5xx, 429, a missing account or scope wait (record keeps its place, reason in `errorMessage`); a poll answered 404 drops the upload id to send again; other 4xx and an unreadable answer fail, for Retry (#632). `Ride.isSyncOwed` mirrors "any record pending, uploading or processing" so the resume can use a predicate; `saveSyncRecord` writes both together. S10's Sync To enqueues as it closes (#631, §4.13); a Sync To Reconnect resumes the queue like S12.1's |
+| `RideSummaryFeature` | — | S10's Sync To (#631), as built in §4.13: per-destination toggles over the remembered choices; closing saves them, queues Strava and sets or clears `isHealthWorkoutOwed` before writing the workout. No write at save. `RideSyncSheetFeature` is retired |
 | `StravaRoutesFeature` | S19 and S05.2 | Paged list of the rider's Strava routes, refetched when shown and more than a day old. A cached route is deleted as gone from Strava only when its own fetch answers 404, or when the list has been read to its last page without it: the list is paged, so a route missing from a partial read stays. Opening or choosing one fetches `routeGPX`, parses and analyses through `GPXRouteImporter` without the surface lookup or narrative, and writes a cached Strava route row under its derived id (DataModel.md §3.8.1). Nothing is imported into the library |
 
 Strava data is a cache of at most seven days (PRD §8.12, DataModel.md §3.8.1). `AppFeature` purges what is older,
@@ -1038,8 +985,8 @@ TrackPointRecorderFeature.reduce(.timerTick)
     └── Ride end: Action.stopRecording
                   → Final flush
                   → GPXExporter.generate(rideId:)
-                  → HealthKitClient.recordWorkout(payload)
                   → RideSummaryFeature presented to rider
+                  → its close writes the HKWorkout, when Sync To's Apple Health is on (§4.13)
 ```
 
 ---
@@ -1236,11 +1183,10 @@ func testL3AlertFiresHapticAndAudio() async {
 | `GPXExporter` | Schema validation; absent fields (not zero) for missing sensors; vehicle pass waypoints |
 | `VehiclePassDetection` | Overtake vs. turn-off discrimination; 2s minimum tracking |
 | Full ride state machine | `idle → active → paused → active → ended`; crash recovery from checkpoint |
-| `RideSummaryFeature` | HKWorkout write on appear; failure handled gracefully; sync sheet presented on tap |
+| `RideSummaryFeature` | Sync To rows and defaults; toggle; Reconnect success, cancel, failure; Delete copy. `RideSummaryPresentationTests`: close commits the choices, Health on/off, Strava queued after the rename, swipe = Finish Ride, close before finalize. `RideEndFailureTests`: no write at Finish, remembered Health off survives a kill |
 | `NavigationFeature` | The ±10 m turn sweep across every fix phase; the rider's own lead distance; multi-turn order and apex; out-and-back followed both ways though the other leg is nearer; a turnaround short of the turnaround; loops (joined near the end, left and re-entered, ridden whole, stood still on); off-route hysteresis at 50/30 m and the five-fix streak; rejoin re-announcing a dropped turn; route end; no route; turn-by-turn off; resume from a checkpointed `progressMeters` |
 | `NavigationPipelineTests` | End to end over a real `.gpx` on disk and a live store: each turn's tone within ±10 m at 20/30/40 km/h; Off route raised within 5 s and cleared on rejoin; a route never joined; a ride with no route through a checkpoint and a relaunch; a deleted route leaving its rides' `routeName`; a ride killed mid-route relaunching still navigating |
 | `RoutesFeature` / `RouteDetailFeature` | Import, list, map-as-filter, filter sheet, swipe-to-use (S19 → S05.1); S20 detail, elevation section hidden on nil gain, "Use This Route" |
-| `RideSyncSheetFeature` | Services loaded; toggle selection; upload per service; status updates; remoteId stored |
 
 ---
 

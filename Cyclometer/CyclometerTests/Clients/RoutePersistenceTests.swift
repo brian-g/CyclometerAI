@@ -349,7 +349,7 @@ struct RoutePersistenceTests {
             if id == newer {
                 summary.weather = conditions
             }
-            try await client.finalizeRide(id, endedAt, summary, nil)
+            try await client.finalizeRide(id, endedAt, summary, nil, true)
         }
         try await client.renameRide(newer, "Saturday Climb")
 

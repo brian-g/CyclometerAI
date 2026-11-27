@@ -86,8 +86,8 @@ struct OwedFinishStats: Sendable, Equatable {
 
 extension RideFinishStats {
     /// Works out and stores the stats of every finished ride still owed them, newest first, and
-    /// returns how many it stored. Runs at launch, after AppFeature's close-outs and after a
-    /// Finish, like the workout backfill; a Finish whose live state covered the whole ride has
+    /// returns how many it stored. Runs at launch and after AppFeature's close-outs, like the
+    /// workout backfill, and after a Finish; a Finish whose live state covered the whole ride has
     /// already stored the live numbers, so it is not owed.
     ///
     /// Calories use Health's body mass as it is now: for a ride closed out at launch that is

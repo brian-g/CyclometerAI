@@ -142,7 +142,7 @@ struct AccountsFeatureTests {
         await store.send(.connectTapped) { $0.isConnecting = true }
         await store.receive(\.connectFinished) {
             $0.isConnecting = false
-            $0.alert = .connectFailed
+            $0.alert = .stravaConnectFailed
         }
     }
 

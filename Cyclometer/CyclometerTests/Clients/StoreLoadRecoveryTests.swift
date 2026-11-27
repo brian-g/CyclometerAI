@@ -241,7 +241,7 @@ struct StoreLoadRecoveryTests {
                 rideId: rideId, recordingState: .ended,
                 durationSeconds: 600, distanceMeters: 4_200, averageSpeedMPS: 7, maxSpeedMPS: 9
             )
-            try await client.finalizeRide(rideId, start.addingTimeInterval(600), summary, export)
+            try await client.finalizeRide(rideId, start.addingTimeInterval(600), summary, export, true)
             #expect(try await client.fetchRides().map(\.id) == [rideId])
 
             // Its row dies with the stand-in, so its export is retained by name.
@@ -277,7 +277,7 @@ struct StoreLoadRecoveryTests {
                     rideId: rideId, recordingState: .ended,
                     durationSeconds: 600, distanceMeters: 4_200, averageSpeedMPS: 7, maxSpeedMPS: 9
                 )
-                try await client.finalizeRide(rideId, start.addingTimeInterval(600), summary, nil)
+                try await client.finalizeRide(rideId, start.addingTimeInterval(600), summary, nil, true)
             }
             // Only the ride recorded since launch has points on the stand-in.
             try await client.flushTrackPoints([TrackPointDTO(

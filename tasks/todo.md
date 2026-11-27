@@ -3470,3 +3470,41 @@ Review (2026-11-27):
 - Full suite after the retry change: 2855 passed; `finishStatsNeverStored` and `RideDashboardSnapshotTests.testRideDashboardRiding`
   failed, and fail the same way on main (checked in a scratch checkout). The 30 s `finish` timeout didn't help (13 of 31
   reads: the thread pool is starved under the full run), so it's reverted to main's version. Both are pre-existing flakes.
+
+---
+
+## #631 — S10 Sync To: choose a ride's destinations (2026-11-27)
+
+Plan: capsules per Sketch "S10 - Ride Summary Sync Options"; Health becomes a destination written on close;
+Strava enqueued on close after the name/notes save. Lock deferred to a new Monetization issue (Brian).
+Reconnect runs `stravaAuth.connect()` in place.
+
+- [x] Persistence: `setHealthWorkoutOwed`; `finalizeRide` takes `owesHealthWorkout`
+- [x] ActiveRideFeature: remembered Health choice at finalize; no workout write at Finish
+- [x] RideSummaryFeature: `syncDestinations`, rows, toggle, reconnect; Delete alert copy
+- [x] RideSummaryView: Sync To capsules between Notes and Summary
+- [x] AppFeature: close commits defaults → save → Health → enqueue; `serviceConnected` → resume; DEBUG case gone
+- [x] Remove DEBUG upload trigger (Accounts, Settings, AppFeature)
+- [x] Tests written and compiling: feature, presentation, finish, persistence (not run yet)
+- [x] Brian's device run; then run suites; re-record S10 snapshots
+- [x] Docs: UX §S10, TCA §4.13/§4.15/§6/§10, Monetization §4
+- [x] File Monetization issue; edit #631 body
+
+Notes (2026-11-27):
+- `RideSyncSheetFeature` never existed in code; retired in TCA.md only. Lock → #667 (M12); #631 body edited.
+- `finalizeRide` takes the Health choice (5th arg), read from `@Shared` inside the finish effect, so a close
+  before finalize lands still wins. A Finish runs no workout backfill; the close does (`setHealthWorkoutOwed`
+  then `RideHealthWorkout.backfill()`), so older owed rides retry there too.
+- Close waits for finalize only when S10 hadn't loaded. Strava enqueued after name/notes save.
+- Disconnected capsule: `point.3.filled.connected.trianglepath.dotted` (UX's 􁅥), unfilled; tap = Reconnect
+  in place (`StravaAuthClient.connectOutcome()`, shared with S12.1). Not committed until reconnected.
+- Strava mark: `stravaMark` asset (UX's `cyclometer.brands.strava-icon` doesn't exist).
+
+Review (2026-11-27):
+- Device (Brian): capsules +10 pt (subheadline, `Spacing.sm` padding), unselected outlined (`cyBorder`), Strava mark
+  frame ×1.25 — `strava-mark.svg`'s glyph fills 512 of its 640-pt viewBox, so a 16 pt frame drew a 12.8 pt logo.
+- Tests: `overriddenZonesAreStamped` failed first — the test's S10-close helper ran outside the ride store's
+  dependencies, so it read another file storage and missed the S12 override. Helper now uses `store.dependencies`.
+- Full CyclometerTests: 3294 passed, 2 failed (`finishStatsNeverStored`, known; `LocationOneShotTests/
+  concurrentRequestsAllResolve`, 88 s under load). Both suites pass alone (45/45). S10 references re-recorded
+  and checked by eye.

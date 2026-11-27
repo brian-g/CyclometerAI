@@ -64,7 +64,7 @@ struct RideDeletionTests {
             rideId: rideId, recordingState: .ended,
             durationSeconds: 3, distanceMeters: 12, averageSpeedMPS: 4, maxSpeedMPS: 4
         )
-        try await client.finalizeRide(rideId, base.addingTimeInterval(3), summary, writesFile ? storedURL : nil)
+        try await client.finalizeRide(rideId, base.addingTimeInterval(3), summary, writesFile ? storedURL : nil, true)
 
         return fixture
     }

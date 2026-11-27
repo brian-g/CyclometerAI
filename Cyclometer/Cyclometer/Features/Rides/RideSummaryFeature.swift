@@ -23,8 +23,12 @@ private let logger = Logger.cyclometer(.persistence)
 /// The Summary shows without them and reads again until they arrive; a backfill that fails
 /// leaves them out, as S15 does until the next launch's backfill.
 ///
-/// The rename and the notes (#645) are saved by `AppFeature` on dismissal, not here: a child's effects are cancelled
-/// as it is dismissed, and a swipe-down is a dismissal like the Finish Ride button.
+/// Sync To (#631) chooses where the ride goes: Apple Health and each connected service, each
+/// starting at the rider's last choice for it. Nothing goes anywhere while the sheet is open.
+///
+/// The rename, the notes (#645) and the Sync To choices are saved by `AppFeature` on dismissal,
+/// not here: a child's effects are cancelled as it is dismissed, and a swipe-down is a dismissal
+/// like the Finish Ride button. That is also where the workout is written and the upload queued.
 @Reducer
 struct RideSummaryFeature {
 
@@ -65,7 +69,14 @@ struct RideSummaryFeature {
         /// One polyline per stretch of riding (#263). Empty for a ride with no drawable track.
         var trackSegments: [[RouteCoordinate]] = []
 
-        /// The ride ended without part of its track (#345), or the Delete confirmation (#452).
+        /// Sync To's toggles the rider changed on this sheet (#631). A destination not in it is at
+        /// the rider's last choice (`AppPreferences.isSyncChosen`).
+        var syncToggles: [SyncDestination: Bool] = [:]
+        /// A Reconnect's sign-in is showing, from a disconnected service's capsule.
+        var isReconnecting = false
+
+        /// The ride ended without part of its track (#345), the Delete confirmation (#452), or a
+        /// Reconnect that failed (#631).
         @Presents var alert: AlertState<Action.Alert>?
 
         init(rideId: UUID) {
@@ -106,6 +117,45 @@ struct RideSummaryFeature {
             let typed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
             return typed == persistedNotes ? nil : typed
         }
+
+        /// Sync To's capsules: Apple Health, then every service with an account, connected or not
+        /// (UX §S10). Live from the preferences, so a Reconnect shows as soon as it lands.
+        var syncRows: [SyncRow] {
+            let services = ExternalService.allCases.compactMap { service in
+                preferences.connectedServices.first { $0.serviceType == service }.map {
+                    (destination: SyncDestination.service(service), needsReconnect: $0.isDisconnected)
+                }
+            }
+            return ([(destination: .appleHealth, needsReconnect: false)] + services).map {
+                SyncRow(destination: $0.destination, isChosen: isSyncChosen($0.destination), needsReconnect: $0.needsReconnect)
+            }
+        }
+
+        /// Whether `destination` is chosen: the rider's toggle on this sheet, else their last choice.
+        func isSyncChosen(_ destination: SyncDestination) -> Bool {
+            syncToggles[destination] ?? preferences.isSyncChosen(destination)
+        }
+
+        /// What closing commits, one entry per capsule the rider could choose: remembered for the
+        /// next ride, and acted on for this one. A service waiting on Reconnect isn't in it: it
+        /// can't take the ride, and its last choice stays for when it can.
+        var syncChoices: [SyncDestination: Bool] {
+            Dictionary(uniqueKeysWithValues: syncRows.filter { !$0.needsReconnect }.map {
+                ($0.destination, $0.isChosen)
+            })
+        }
+    }
+
+    /// One Sync To capsule (#631).
+    struct SyncRow: Equatable, Identifiable {
+        let destination: SyncDestination
+        /// The rider's toggle on this sheet, else their last choice. Drawn unchosen while
+        /// `needsReconnect`, and not acted on.
+        let isChosen: Bool
+        /// The account can't sign requests (`ConnectedService.isDisconnected`): the capsule
+        /// reconnects instead of toggling.
+        let needsReconnect: Bool
+        var id: SyncDestination { destination }
     }
 
     /// One device the ride flagged: a combo CSC sensor is one battery and one radio, listed once
@@ -140,6 +190,9 @@ struct RideSummaryFeature {
         case titleChanged(String)
         case titleFocused
         case notesChanged(String)
+        /// A Sync To capsule (#631): toggles it, or reconnects a disconnected service.
+        case syncDestinationTapped(SyncDestination)
+        case reconnectFinished(StravaConnectOutcome)
         case finishTapped
         /// The toolbar's trash button (#452). Enabled only once loaded: before that the ride's
         /// finalize hasn't landed, and an unavailable ride is still the next launch's to close out.
@@ -156,6 +209,9 @@ struct RideSummaryFeature {
             /// Confirmed. `AppFeature` closes the sheet and deletes the ride through the Rides
             /// tab: this feature's effects are cancelled as it goes.
             case deleteRide
+            /// A Reconnect from Sync To landed: uploads waiting on the service can go, as after
+            /// S12.1's (#630, #631).
+            case serviceConnected
         }
     }
 
@@ -164,6 +220,7 @@ struct RideSummaryFeature {
     @Dependency(\.continuousClock) var clock
     @Dependency(\.calendar) var calendar
     @Dependency(\.dismiss) var dismiss
+    @Dependency(\.stravaAuth) var stravaAuth
 
     /// How long a ride still owed its finish stats at load is read again for them, once a
     /// second (#650). The backfill starts right after the finalize S10 waited for, and reads
@@ -274,6 +331,33 @@ struct RideSummaryFeature {
                 state.notes = notes
                 return .none
 
+            case .syncDestinationTapped(let destination):
+                guard let row = state.syncRows.first(where: { $0.destination == destination }) else { return .none }
+                guard row.needsReconnect else {
+                    state.syncToggles[destination] = !row.isChosen
+                    return .none
+                }
+                // Strava is the one service that can connect yet (PRD §8.12).
+                guard destination == .service(.strava), !state.isReconnecting else { return .none }
+                state.isReconnecting = true
+                return .run { [stravaAuth] send in
+                    await send(.reconnectFinished(await stravaAuth.connectOutcome()))
+                }
+
+            case .reconnectFinished(let outcome):
+                state.isReconnecting = false
+                switch outcome {
+                case .connected:
+                    // Reconnecting is choosing it: the rider tapped this ride's capsule.
+                    state.syncToggles[.service(.strava)] = true
+                    return .send(.delegate(.serviceConnected))
+                case .cancelled:
+                    return .none
+                case .failed:
+                    state.alert = .stravaConnectFailed
+                    return .none
+                }
+
             case .finishTapped:
                 return .run { [dismiss] _ in await dismiss() }
 
@@ -311,7 +395,8 @@ struct RideSummaryFeature {
         ButtonState(role: .destructive, action: .confirmDelete) { TextState("Delete") }
         ButtonState(role: .cancel) { TextState("Cancel") }
     } message: {
-        TextState("It will be removed from Acme Ride and Apple Health. This can't be undone.")
+        // Nothing has gone to Apple Health or any service yet: that happens as S10 closes (#631).
+        TextState("It will be removed from Acme Ride. This can't be undone.")
     }
 
     private static func clearUnsavedTrack(_ rideId: UUID) {

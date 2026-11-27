@@ -43,7 +43,9 @@ final class RideSummarySnapshotTests: XCTestCase {
     private func screen(
         stats: RideStats?,
         pairedSensors: [PairedSensor] = [],
-        sensorHealth: [UUID: SensorHealthReport] = [:]
+        sensorHealth: [UUID: SensorHealthReport] = [:],
+        connectedServices: [ConnectedService] = [],
+        syncDestinationDefaults: [SyncDestination: Bool] = [:]
     ) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
@@ -54,6 +56,8 @@ final class RideSummarySnapshotTests: XCTestCase {
                 $0.preferredUnit = .imperial
                 $0.pairedSensors = pairedSensors
                 $0.sensorHealth = sensorHealth
+                $0.connectedServices = connectedServices
+                $0.syncDestinationDefaults = syncDestinationDefaults
             }
             let points = RideSummaryFeatureTests.track(count: 600)
             var state = RideSummaryFeature.State(rideId: Self.summary.id)
@@ -118,6 +122,29 @@ final class RideSummarySnapshotTests: XCTestCase {
         assertBothSchemes(screen(stats: RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, ascentMeters: 412,
                                                   descentMeters: 398, movingSeconds: 7_100)),
                           named: "gps-only")
+    }
+
+    private static let gpsOnlyStats = RideStats(averageSpeedMPS: 7.2, maxSpeedMPS: 12.4, ascentMeters: 412,
+                                                descentMeters: 398, movingSeconds: 7_100)
+
+    private static func strava(isDisconnected: Bool = false) -> ConnectedService {
+        ConnectedService(serviceType: .strava, keychainIdentifier: "strava", athleteID: "1",
+                         grantedScopes: [StravaConfig.uploadScope], connectedAt: summary.startedAt,
+                         isDisconnected: isDisconnected)
+    }
+
+    /// Sync To (#631) with Strava connected and chosen, and Apple Health left off last time: one
+    /// capsule filled, one not.
+    func testRideSummarySyncTo() {
+        assertBothSchemes(screen(stats: Self.gpsOnlyStats, connectedServices: [Self.strava()],
+                                 syncDestinationDefaults: [.appleHealth: false]),
+                          named: "sync-to")
+    }
+
+    /// Strava revoked access: its capsule shows the connection symbol and offers Reconnect (#631).
+    func testRideSummarySyncToReconnect() {
+        assertBothSchemes(screen(stats: Self.gpsOnlyStats, connectedServices: [Self.strava(isDisconnected: true)]),
+                          named: "sync-to-reconnect")
     }
 
     /// The stats read failed: Distance and Time from the ride's row, and a row saying the rest

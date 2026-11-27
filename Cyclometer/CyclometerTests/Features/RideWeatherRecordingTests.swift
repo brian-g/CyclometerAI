@@ -54,7 +54,7 @@ struct RideWeatherRecordingTests {
         #expect(try await client.fetchResumableRide()?.weather == Array(Self.samples.prefix(1)))
 
         update.weather = Self.samples
-        try await client.finalizeRide(rideId, Self.start.addingTimeInterval(1_800), update, nil)
+        try await client.finalizeRide(rideId, Self.start.addingTimeInterval(1_800), update, nil, true)
         #expect(try await client.fetchRideStats(rideId).weather == Self.samples)
     }
 
@@ -65,7 +65,7 @@ struct RideWeatherRecordingTests {
         try await client.createRide(rideId, Self.start, nil)
         try await client.finalizeRide(rideId, Self.start.addingTimeInterval(600), RideSummaryUpdate(
             rideId: rideId, durationSeconds: 600, distanceMeters: 4_000, averageSpeedMPS: 6.6, maxSpeedMPS: 10
-        ), nil)
+        ), nil, true)
         #expect(try await client.fetchRideStats(rideId).weather.isEmpty)
     }
 

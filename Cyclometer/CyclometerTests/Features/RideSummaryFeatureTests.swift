@@ -39,12 +39,16 @@ struct RideSummaryFeatureTests {
         persistenceClient: PersistenceClient,
         geocodingClient: GeocodingClient = .testValue,
         clock: any Clock<Duration> = TestClock(),
-        load: RideSummaryFeature.State.Load = .waiting
+        load: RideSummaryFeature.State.Load = .waiting,
+        seed: (inout AppPreferences) -> Void = { _ in },
+        stravaAuth: StravaAuthClient = .testValue
     ) -> TestStoreOf<RideSummaryFeature> {
         let storage = FileStorage.inMemory
         return withDependencies {
             $0.defaultFileStorage = storage
         } operation: {
+            @Shared(.appPreferences) var preferences
+            $preferences.withLock(seed)
             var state = RideSummaryFeature.State(rideId: Self.summary.id)
             state.load = load
             return TestStore(initialState: state) {
@@ -55,6 +59,7 @@ struct RideSummaryFeatureTests {
                 $0.continuousClock = clock
                 $0.calendar = Self.calendar
                 $0.defaultFileStorage = storage
+                $0.stravaAuth = stravaAuth
                 // Its own, so parallel tests can't read each other's `unsavedTrackPoints` (#345).
                 $0.defaultInMemoryStorage = InMemoryStorage()
             }
@@ -627,6 +632,144 @@ struct RideSummaryFeatureTests {
         let store = makeStore(persistenceClient: .mock(), load: load)
 
         await store.send(.deleteTapped)
+    }
+
+    // MARK: Sync To (#631)
+
+    nonisolated private static func strava(isDisconnected: Bool = false) -> ConnectedService {
+        ConnectedService(serviceType: .strava, keychainIdentifier: "strava", athleteID: "1",
+                         grantedScopes: [StravaConfig.uploadScope], connectedAt: startedAt,
+                         isDisconnected: isDisconnected)
+    }
+
+    private static func connecting(_ outcome: Result<Void, StravaAuthError>) -> StravaAuthClient {
+        var client = StravaAuthClient.testValue
+        client.connect = {
+            try outcome.get()
+            return strava()
+        }
+        return client
+    }
+
+    @Test("with no choice remembered, Apple Health and every connected service start chosen")
+    func syncDefaultsOn() {
+        let store = makeStore(persistenceClient: .mock(), seed: { $0.connectedServices = [Self.strava()] })
+
+        #expect(store.state.syncRows == [
+            RideSummaryFeature.SyncRow(destination: .appleHealth, isChosen: true, needsReconnect: false),
+            RideSummaryFeature.SyncRow(destination: .service(.strava), isChosen: true, needsReconnect: false),
+        ])
+    }
+
+    @Test("each destination starts at the rider's last choice")
+    func syncDefaultsRemembered() {
+        let store = makeStore(persistenceClient: .mock(), seed: {
+            $0.connectedServices = [Self.strava()]
+            $0.syncDestinationDefaults = [.appleHealth: false, .service(.strava): true]
+        })
+
+        #expect(store.state.syncRows.map(\.isChosen) == [false, true])
+        #expect(store.state.syncChoices == [.appleHealth: false, .service(.strava): true])
+    }
+
+    @Test("with no service connected, Sync To is Apple Health alone")
+    func syncHealthAlone() {
+        let store = makeStore(persistenceClient: .mock())
+
+        #expect(store.state.syncRows.map(\.destination) == [.appleHealth])
+    }
+
+    @Test("a disconnected service shows, offering Reconnect, and isn't among what closing commits")
+    func syncDisconnectedRow() {
+        let store = makeStore(persistenceClient: .mock(), seed: { $0.connectedServices = [Self.strava(isDisconnected: true)] })
+
+        #expect(store.state.syncRows.last == RideSummaryFeature.SyncRow(
+            destination: .service(.strava), isChosen: true, needsReconnect: true
+        ))
+        #expect(store.state.syncChoices == [.appleHealth: true])
+    }
+
+    @Test("tapping a capsule toggles it, and only on this sheet: the remembered choice waits for the close")
+    func syncToggle() async {
+        let store = makeStore(persistenceClient: .mock(), seed: { $0.connectedServices = [Self.strava()] })
+
+        await store.send(.syncDestinationTapped(.service(.strava))) {
+            $0.syncToggles[.service(.strava)] = false
+        }
+        await store.send(.syncDestinationTapped(.service(.strava))) {
+            $0.syncToggles[.service(.strava)] = true
+        }
+        await store.send(.syncDestinationTapped(.appleHealth)) {
+            $0.syncToggles[.appleHealth] = false
+        }
+        #expect(store.state.preferences.syncDestinationDefaults.isEmpty)
+    }
+
+    @Test("tapping a disconnected Strava reconnects it, chooses it, and tells the parent")
+    func syncReconnect() async {
+        let store = makeStore(
+            persistenceClient: .mock(),
+            seed: {
+                $0.connectedServices = [Self.strava(isDisconnected: true)]
+                $0.syncDestinationDefaults = [.service(.strava): false]
+            },
+            stravaAuth: Self.connecting(.success(()))
+        )
+
+        await store.send(.syncDestinationTapped(.service(.strava))) {
+            $0.isReconnecting = true
+        }
+        await store.receive(\.reconnectFinished) {
+            $0.isReconnecting = false
+            $0.syncToggles[.service(.strava)] = true
+        }
+        await store.receive(\.delegate.serviceConnected)
+    }
+
+    @Test("backing out of Reconnect changes nothing and says nothing")
+    func syncReconnectCancelled() async {
+        let store = makeStore(
+            persistenceClient: .mock(),
+            seed: { $0.connectedServices = [Self.strava(isDisconnected: true)] },
+            stravaAuth: Self.connecting(.failure(.denied))
+        )
+
+        await store.send(.syncDestinationTapped(.service(.strava))) {
+            $0.isReconnecting = true
+        }
+        await store.receive(\.reconnectFinished) {
+            $0.isReconnecting = false
+        }
+    }
+
+    @Test("a Reconnect that fails says so")
+    func syncReconnectFailed() async {
+        let store = makeStore(
+            persistenceClient: .mock(),
+            seed: { $0.connectedServices = [Self.strava(isDisconnected: true)] },
+            stravaAuth: Self.connecting(.failure(.tokenService(status: 500)))
+        )
+
+        await store.send(.syncDestinationTapped(.service(.strava))) {
+            $0.isReconnecting = true
+        }
+        await store.receive(\.reconnectFinished) {
+            $0.isReconnecting = false
+            $0.alert = .stravaConnectFailed
+        }
+    }
+
+    @Test("Delete's confirmation no longer mentions Apple Health: nothing has been written yet")
+    func deleteAlertCopy() {
+        let expected = AlertState<RideSummaryFeature.Action.Alert> {
+            TextState("Delete This Ride?")
+        } actions: {
+            ButtonState(role: .destructive, action: .confirmDelete) { TextState("Delete") }
+            ButtonState(role: .cancel) { TextState("Cancel") }
+        } message: {
+            TextState("It will be removed from Acme Ride. This can't be undone.")
+        }
+        #expect(RideSummaryFeature.deleteAlert == expected)
     }
 }
 
