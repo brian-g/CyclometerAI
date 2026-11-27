@@ -44,6 +44,16 @@ private struct ConnectedContent: View {
         Form {
             Section {
                 AthleteCard(athlete: store.athlete, connectedAt: account.connectedAt)
+                    #if DEBUG
+                    // Long-press starts an upload so #630's queue can be checked on device; #631
+                    // replaces it with S10's Sync To. A context menu draws nothing until pressed, so
+                    // S12.1's snapshot references don't change for something this short-lived.
+                    .contextMenu {
+                        Button("Upload Latest Ride", systemImage: "arrow.up.circle") {
+                            store.send(.debugUploadTapped)
+                        }
+                    }
+                    #endif
             }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())

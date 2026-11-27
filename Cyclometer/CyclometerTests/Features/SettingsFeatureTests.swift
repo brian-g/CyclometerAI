@@ -712,4 +712,17 @@ struct SettingsFeatureTests {
         await store.finish()
         #expect(disconnects.value == 1)
     }
+
+    /// `StravaSession` writes the record outside any reducer, so the app learns of a connect from
+    /// S12.1, not from watching the preferences (#630).
+    @Test("A connect in S12.1 tells the app, which resumes the upload queue")
+    func connectTellsApp() async {
+        let store = makeStore()
+
+        await store.send(.path(.push(id: 0, state: .stravaAccount(AccountsFeature.State())))) {
+            $0.path[id: 0] = .stravaAccount(AccountsFeature.State())
+        }
+        await store.send(.path(.element(id: 0, action: .stravaAccount(.delegate(.connected)))))
+        await store.receive(\.delegate.stravaConnected)
+    }
 }

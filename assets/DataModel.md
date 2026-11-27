@@ -1,7 +1,8 @@
 # Cyclometer — Data Model Specification
 **Version:** 1.4
 **Date:** 2026-05-21
-**Updated:** 2026-11-25 (#629) — §3.8 `ConnectedService` loses `accountDisplayName`: S12.1 fetches the athlete's name each time it appears. Old records still decode. No schema change.  
+**Updated:** 2026-11-26 (#630) — §3.1: `Ride.isSyncOwed: Bool = false`, true while any sync record is pending, uploading or processing, so the upload queue finds them with a predicate; `RideSyncRecord.remoteUploadId`, the upload id a `processing` record resumes polling. `SyncStatus.isOwed`. §9 adds 1.3.1.  
+**Previously:** 2026-11-25 (#629) — §3.8 `ConnectedService` loses `accountDisplayName`: S12.1 fetches the athlete's name each time it appears. Old records still decode. No schema change.  
 **Previously:** 2026-11-25 (Strava API terms, PRD §8.12 v0.6.28) — §3.8.1: Strava data is a cache of at most seven days, so a Route with a `stravaRouteID` is a cached Strava route, not an import. Its id is derived from the Strava id, `stravaSegmentsFetchedAt` is its fetch time, and it is deleted seven days after that fetch or on disconnect. Ride efforts follow the same cache. §10's cache test and OQDM11 (a Strava route's name on a ride) follow. S20's Strava segments are dropped (#637), so `Route.stravaSegmentsData` and `StravaRouteSegment` go unused; the column stays, since removing it would need a schema stage. No schema change.  
 **Previously:** 2026-11-24 (#628) — Schema 1.3 built: the Strava cache columns on `Ride` and `Route`, `SyncStatus.processing`, and `ConnectedService`, `connectedServices` and `syncDestinationDefaults` in the AppPreferences document. `SyncDestination` is stored by name, so the defaults are a JSON object and an unknown destination is dropped alone. §1, §3.1, §3.7, §3.8, §9 and OQDM7 updated.  
 **Previously:** 2026-11-21 (Strava, PRD §8.12) — §3.8 ConnectedService becomes a `Codable` value in the AppPreferences document, with Keychain `OAuthTokens`, granted scopes and S10's remembered sync defaults. New §3.8.1: segment efforts cached on `Ride`, Strava route id and segments on `Route`. §9 adds schema 1.3.  
@@ -228,6 +229,7 @@ final class Ride {
     // Per-service sync tracking. Written by SyncQueueFeature (TCA.md §4.15) as uploads run.
     @Attribute(.externalStorage)
     var syncRecordsData: Data?
+    var isSyncOwed: Bool = false               // Any record pending/uploading/processing (#630): the queue's resume predicate; written with the records
 
     var syncRecords: [RideSyncRecord] {
         get { column("syncRecordsData").read([RideSyncRecord].self, from: syncRecordsData) ?? [] }
@@ -324,6 +326,7 @@ struct RideSyncRecord: Codable, Sendable {
     var syncedAt: Date?                        // nil until successfully synced
     var remoteActivityId: String?              // e.g. Strava activity ID; used for deep linking
     var errorMessage: String?                  // Last failure reason; nil when synced
+    var remoteUploadId: String?                // Strava's upload id while processing, so a relaunch resumes polling (#630)
 }
 
 enum SyncStatus: String, Codable, Sendable {
@@ -1391,6 +1394,7 @@ zone 1 rather than dividing by zero — unreachable through validation, but the 
 | 1.1.10 (M12 — Monetization) | Add `Ride.isHealthWorkoutDeferred: Bool = false`, set by `finalizeRide` instead of `isHealthWorkoutOwed` while the app is Free, and moved to owed when the rider accepts the unlock's backfill prompt (Monetization.md §4.1). Inferred lightweight migration gives older rides false |
 | 1.2 (Phase 2 — Bikes) | Add Bike @Model (§3.9) — no Wheelset entity. Add `wheelCircumferenceMM` + `isAutoCalibrated` to PairedSensor and move the value there from the AppPreferences document's top level. Re-key PairedSensor from role to (bike, role), migrating existing records onto a default Bike; leave heart-rate sensors rider-scoped. **None of the PairedSensor work is a schema stage** — since #67 it is a nested `Codable` value, so this is a one-shot read-then-write at launch plus a decode shim. Add `Bike.stravaGearID`, `Ride.bike` and the `Ride.bikeName` snapshot |
 | 1.3 (Phase 2 — Strava) | Add `Ride.stravaSegmentEffortsData`, `Ride.stravaSegmentsFetchedAt`, `Route.stravaRouteID`, `Route.stravaSegmentsData` and `Route.stravaSegmentsFetchedAt`, all optional, so inferred lightweight migration applies; `SyncStatus` gains `processing`. ConnectedService and the sync defaults are AppPreferences document fields (§3.8), not a schema stage. Built in #628; `RideSchemaMigrationTests` and `RouteSchemaMigrationTests` open an older store with the new columns nil, and `AppPreferencesTests` decodes a document without the new keys |
+| 1.3.1 (Phase 2 — #630) | Add `Ride.isSyncOwed: Bool = false` at the declaration, so inferred lightweight migration gives older rides false (#186): none has a sync record. `RideSyncRecord.remoteUploadId` is a field of the JSON column, optional, and needs no stage. `RideSchemaMigrationTests` covers it |
 | 2.0 (Phase 3 — Power) | Add TrackPointMO.powerWatts column; add Ride.powerAverageWatts |
 
 Key rules:
