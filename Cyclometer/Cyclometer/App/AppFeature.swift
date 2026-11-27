@@ -353,16 +353,20 @@ struct AppFeature {
                 }
                 let sendsToHealth = choices[.appleHealth] ?? false
                 let sendsToStrava = choices[.service(.strava)] ?? false
-                let isFinalized = summary.load == .loaded
+                let isLoaded = summary.load == .loaded
                 return .run { [persistenceClient, clock] send in
-                    await Self.saveNameAndNotes(id, title: title, notes: notes, persistenceClient: persistenceClient, send: send)
                     // Only a finalized ride is sent anywhere, and S10 can close before its finalize
                     // lands. One that never does is closed out at next launch, owed its workout as
                     // the choice just remembered says, and isn't uploaded.
+                    var isFinalized = isLoaded
                     if !isFinalized {
-                        guard (try? await RidesFeature.awaitFinalized(id, persistenceClient: persistenceClient, clock: clock)) != nil
-                        else { return }
+                        isFinalized = (try? await RidesFeature.awaitFinalized(id, persistenceClient: persistenceClient, clock: clock)) != nil
                     }
+                    // After the finalize, whose GPX export names an unnamed ride (`titleForExport`):
+                    // a name saved before it can be overwritten by the default, or miss the file.
+                    // Saved whether or not the finalize lands.
+                    await Self.saveNameAndNotes(id, title: title, notes: notes, persistenceClient: persistenceClient, send: send)
+                    guard isFinalized else { return }
                     // After the name and notes: the upload reads them from the ride as it starts.
                     if sendsToStrava {
                         await send(.syncQueue(.enqueue(rideId: id)))
@@ -417,8 +421,9 @@ struct AppFeature {
                     return .run { [persistenceClient, rideEndIntentClient, date] send in
                         // One the rider had ended keeps its end and its export (#357): closed with
                         // nil, the export is unreferenced and the launch sweep deletes it (#346).
-                        // Its end is when the rider stopped, so it stays owed its Apple Health
-                        // workout, as on the main close-out path (#584).
+                        // Its end is when the rider stopped, so it's owed its Apple Health workout
+                        // when the remembered Sync To choice says so, as on the main close-out
+                        // path (#584, #631).
                         if let pendingEnd {
                             try? await Self.finalizeEndedRide(
                                 pendingEnd, summary, persistenceClient, rideEndIntentClient

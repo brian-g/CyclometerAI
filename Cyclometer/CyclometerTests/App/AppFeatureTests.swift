@@ -453,9 +453,11 @@ struct AppFeatureTests {
             $0.date = .constant(Date(timeIntervalSince1970: 2_000_000))
             $0.rideEndIntentClient = rideEndIntent
             var client = PersistenceClient.mock(
-                onFinalizeRide: { id, endedAt, summary, url, _ in
+                onFinalizeRide: { id, endedAt, summary, url, owesHealthWorkout in
                     finalized.withValue { $0.append((id, endedAt, url)) }
                     finalizedSummaries.withValue { $0.append(summary) }
+                    // Owed only as the remembered Apple Health choice says (#631).
+                    guard owesHealthWorkout else { return }
                     owed.withValue {
                         $0.append(OwedHealthWorkout(
                             rideId: id,

@@ -84,6 +84,9 @@ extension StravaAuthClient {
             return .connected
         } catch let error as StravaAuthError where error.isRiderCancellation {
             return .cancelled
+        } catch is CancellationError {
+            // The screen that started it closed mid sign-in: not a failure either.
+            return .cancelled
         } catch {
             logger.error("Strava connect failed: \(error.localizedDescription, privacy: .public)")
             return .failed
