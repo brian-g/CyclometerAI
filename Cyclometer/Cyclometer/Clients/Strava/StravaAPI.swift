@@ -44,6 +44,9 @@ struct StravaAPI: Sendable {
             routeGPX: { routeID in
                 try await fetch(Request(name: "routeGPX", path: "routes/\(routeID)/export_gpx"))
             },
+            athlete: {
+                try StravaWire.athlete(from: try await fetch(Request(name: "athlete", path: "athlete")))
+            },
             bikes: {
                 try StravaWire.bikes(from: try await fetch(Request(name: "athlete", path: "athlete")))
             },

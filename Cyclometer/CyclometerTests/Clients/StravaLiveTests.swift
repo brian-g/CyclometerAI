@@ -48,6 +48,12 @@ struct StravaLiveTests {
         print("strava live: \(bikes.count) bikes")
     }
 
+    @Test("The athlete decodes")
+    func athlete() async throws {
+        let athlete = try await client.athlete()
+        print("strava live: athlete name \(athlete.name == nil ? "absent" : "present"), photo \(athlete.photoURL == nil ? "absent" : "present")")
+    }
+
     @Test("The first page of routes decodes; prints each route's type and subtype for #634")
     func routes() async throws {
         let routes = try await client.routes(1)

@@ -64,6 +64,8 @@ actor StravaSession {
 
     /// The refresh in flight, which every caller needing a fresh token awaits.
     private var refreshTask: Task<OAuthTokens, any Error>?
+    /// The disconnect in flight, which a connect's code exchange waits out.
+    private var disconnectTask: Task<Void, any Error>?
 
     init(
         transport: StravaTransport,
@@ -86,10 +88,20 @@ actor StravaSession {
     /// Signs in, exchanges the code through the token service, writes the tokens to the Keychain
     /// and then saves the record, so a record never names an item that was never written.
     /// Replaces an earlier record, which is how Reconnect clears `isDisconnected`.
+    ///
+    /// Once Strava has redirected back, the rest runs in an unstructured task, so a caller
+    /// cancelled then (the rider left S12.1) doesn't lose a sign-in they already finished.
     func connect() async throws -> ConnectedService {
         let state = UUID().uuidString
         let callback = try await authorize(state)
         let (code, scopes) = try Self.authorization(from: callback, expectedState: state)
+        return try await Task { try await self.exchange(code: code, scopes: scopes) }.value
+    }
+
+    private func exchange(code: String, scopes: Set<String>) async throws -> ConnectedService {
+        // Strava's deauthorize revokes every token the app holds for the athlete, so a revoke
+        // still in flight would also revoke the tokens this exchange is about to get.
+        await settleDisconnect()
 
         let (data, status) = try await post("token", ["code": code])
         guard status == 200 else { throw StravaAuthError.tokenService(status: status) }
@@ -103,13 +115,13 @@ actor StravaSession {
         // these when it lands.
         await settleRefresh()
         try keychain.write(StravaConfig.keychainAccount, Self.encode(exchange.tokens))
+        let athleteID = String(athlete.id)
         let record = ConnectedService(
             serviceType: .strava,
             keychainIdentifier: StravaConfig.keychainAccount,
-            athleteID: String(athlete.id),
-            accountDisplayName: athlete.displayName,
+            athleteID: athleteID,
             grantedScopes: scopes,
-            connectedAt: now()
+            connectedAt: connectedSince(athleteID: athleteID)
         )
         preferences.withLock { preferences in
             preferences.connectedServices.removeAll { $0.serviceType == .strava }
@@ -117,6 +129,13 @@ actor StravaSession {
         }
         logger.info("connected Strava, scopes \(scopes.sorted().joined(separator: ","), privacy: .public)")
         return record
+    }
+
+    /// When the account was first connected. Reconnecting the same live account to grant a scope
+    /// keeps the date; a new athlete, or an account Strava revoked, starts again from now.
+    private func connectedSince(athleteID: String) -> Date {
+        guard let earlier = stravaRecord, earlier.athleteID == athleteID, !earlier.isDisconnected else { return now() }
+        return earlier.connectedAt
     }
 
     // MARK: - Access token
@@ -196,7 +215,17 @@ actor StravaSession {
     /// start a refresh with the token being revoked and write its answer back. The revoke is best
     /// effort: the rider asked to disconnect, and a failed revoke must not leave the account
     /// connected. Every step runs even when an earlier one fails; the first failure is thrown.
+    ///
+    /// Runs in an unstructured task that a connect waits out (`settleDisconnect`), and that a
+    /// cancelled caller doesn't cut short.
     func disconnect() async throws {
+        let task = Task { try await self.removeAccount() }
+        disconnectTask = task
+        defer { if disconnectTask == task { disconnectTask = nil } }
+        try await task.value
+    }
+
+    private func removeAccount() async throws {
         await settleRefresh()
         let tokens = try? storedTokens()
         var firstError: (any Error)?
@@ -260,6 +289,14 @@ actor StravaSession {
         }
     }
 
+    /// Waits out any disconnect in flight, including one started while waiting.
+    private func settleDisconnect() async {
+        while let task = disconnectTask {
+            _ = try? await task.value
+            if disconnectTask == task { disconnectTask = nil }
+        }
+    }
+
     /// POSTs a JSON body to one token service endpoint. Logs the status of a failure, never a
     /// body: both directions carry codes and tokens.
     private func post(_ endpoint: String, _ body: [String: String]) async throws -> (Data, Int) {
@@ -314,15 +351,8 @@ private struct TokenResponse: Decodable {
         OAuthTokens(accessToken: accessToken, refreshToken: refreshToken, expiresAt: Date(timeIntervalSince1970: expiresAt))
     }
 
+    /// Only the id is kept; the name and photo are fetched when S12.1 shows them (PRD §8.12).
     struct Athlete: Decodable {
         var id: Int64
-        var firstname: String?
-        var lastname: String?
-
-        /// The athlete's name as the rider's locale writes it; nil when Strava has none.
-        var displayName: String? {
-            let name = PersonNameComponents(givenName: firstname, familyName: lastname).formatted()
-            return name.isEmpty ? nil : name
-        }
     }
 }

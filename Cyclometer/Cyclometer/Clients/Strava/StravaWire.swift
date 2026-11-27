@@ -103,6 +103,18 @@ enum StravaWire {
         return StravaRouteDetail(summary: route.summary, segments: segments)
     }
 
+    // MARK: - Athlete
+
+    /// The name and photo in `GET /athlete`. Strava's `profile` is a relative default-avatar path
+    /// (`avatar/athlete/large.png`) when the athlete has no photo, which isn't a photo to load.
+    static func athlete(from data: Data) throws -> StravaAthlete {
+        let athlete = try decode(Athlete.self, from: data)
+        let photoURL = athlete.profile.flatMap(URL.init(string:)).flatMap { url in
+            url.scheme == "https" || url.scheme == "http" ? url : nil
+        }
+        return StravaAthlete(firstName: athlete.firstname, lastName: athlete.lastname, photoURL: photoURL)
+    }
+
     // MARK: - Gear
 
     /// The bikes in `GET /athlete`.
@@ -223,6 +235,10 @@ private extension StravaWire {
     }
 
     struct Athlete: Decodable {
+        var firstname: String?
+        var lastname: String?
+        /// The large (124 px) photo's URL.
+        var profile: String?
         var bikes: [Row<Gear>]?
     }
 

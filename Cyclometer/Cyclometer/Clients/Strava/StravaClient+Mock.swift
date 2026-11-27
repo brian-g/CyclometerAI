@@ -15,6 +15,7 @@ extension StravaClient {
         routes: [StravaRouteSummary] = [],
         routeDetails: [String: StravaRouteDetail] = [:],
         gpx: [String: Data] = [:],
+        athlete: StravaAthlete = StravaAthlete(name: "Ada Lovelace", photoURL: nil),
         bikes: [StravaGear] = [],
         onUpload: @escaping @Sendable (StravaUpload) -> Void = { _ in },
         onSetGear: @escaping @Sendable (_ activityID: String, _ gearID: String) -> Void = { _, _ in }
@@ -46,6 +47,7 @@ extension StravaClient {
                 guard let data = gpx[routeID] else { throw StravaError.http(status: 404) }
                 return data
             },
+            athlete: { athlete },
             bikes: { bikes },
             setGear: { activityID, gearID in onSetGear(activityID, gearID) }
         )

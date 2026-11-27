@@ -11,12 +11,34 @@ struct SettingsView: View {
             GeneralSection(store: store)
             HRZonesSection(store: store)
             CadenceZonesSection(store: store)
+            AccountsSection(store: store)
             AboutSection()
         }
         .navigationTitle("Settings")
         .task { await store.send(.task).finish() }
         // A dim preview the slider never ended gives the rider's brightness back (#471).
         .onDisappear { store.send(.dimPreviewEnded) }
+    }
+}
+
+/// The Settings tab's stack, driven by `SettingsFeature.path` so S12.1's Disconnect can pop it
+/// (#629). Shaped like `RidesNavigationStack`.
+struct SettingsNavigationStack: View {
+    @Bindable var store: StoreOf<SettingsFeature>
+    /// Hides Start Ride while a ride records, as every tab does.
+    var isStartRideHidden: Bool = false
+    var onStartRide: () -> Void = {}
+
+    var body: some View {
+        NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
+            SettingsView(store: store)
+                .startRideToolbarItem(isHidden: isStartRideHidden, action: onStartRide)
+        } destination: { pathStore in
+            switch pathStore.case {
+            case .stravaAccount(let accountStore):
+                AccountsView(store: accountStore)
+            }
+        }
     }
 }
 
@@ -178,6 +200,33 @@ private struct CadenceZonesSection: View {
     }
 }
 
+/// One row per supported service (#629), connected or not: just Strava for now. The row pushes
+/// S12.1, which shows Connect or the account. After Cadence Zones, which Design.sketch predates.
+private struct AccountsSection: View {
+    let store: StoreOf<SettingsFeature>
+
+    var body: some View {
+        Section("Accounts") {
+            NavigationLink(state: store.stravaAccount) {
+                LabeledContent {
+                    if store.stravaNeedsReconnect { Text("Reconnect") }
+                } label: {
+                    Label {
+                        Text("Strava")
+                    } icon: {
+                        // Strava's mark in the label colour, as Design.sketch draws it: no orange
+                        // outside Strava's own assets.
+                        Image(.stravaMark)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(Color.cyTextPrimary)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct AboutSection: View {
     private var appVersion: String {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -207,11 +256,24 @@ private func previewStore(
     isCustomWheel: Bool = false,
     customCircumferenceDraft: String? = nil,
     restingOverrideDraft: String? = nil,
-    maxOverrideDraft: String? = nil
+    maxOverrideDraft: String? = nil,
+    isStravaDisconnected: Bool = false
 ) -> StoreOf<SettingsFeature> {
     var state = SettingsFeature.State()
     state.isSystemLiveActivityEnabled = isSystemLiveActivityEnabled
-    state.$preferences.withLock { $0.isAutoDimEnabled = isAutoDimEnabled }
+    state.$preferences.withLock {
+        $0.isAutoDimEnabled = isAutoDimEnabled
+        $0.connectedServices = isStravaDisconnected ? [
+            ConnectedService(
+                serviceType: .strava,
+                keychainIdentifier: StravaConfig.keychainAccount,
+                athleteID: "134815",
+                grantedScopes: Set(StravaConfig.requestedScopes),
+                connectedAt: Date(timeIntervalSince1970: 1_795_996_800),
+                isDisconnected: true
+            ),
+        ] : []
+    }
     state.userChoseCustom = isCustomWheel
     state.customCircumferenceDraft = customCircumferenceDraft
     state.restingOverrideDraft = restingOverrideDraft
@@ -229,25 +291,29 @@ private func previewStore(
 }
 
 #Preview("Default") {
-    NavigationStack { SettingsView(store: previewStore(isSystemLiveActivityEnabled: true)) }
+    SettingsNavigationStack(store: previewStore(isSystemLiveActivityEnabled: true))
 }
 
 #Preview("Live Activities off in iOS") {
-    NavigationStack { SettingsView(store: previewStore(isSystemLiveActivityEnabled: false)) }
+    SettingsNavigationStack(store: previewStore(isSystemLiveActivityEnabled: false))
 }
 
 #Preview("Auto-dim off") {
-    NavigationStack { SettingsView(store: previewStore(isAutoDimEnabled: false)) }
+    SettingsNavigationStack(store: previewStore(isAutoDimEnabled: false))
 }
 
 #Preview("Custom wheel size") {
-    NavigationStack { SettingsView(store: previewStore(isCustomWheel: true)) }
+    SettingsNavigationStack(store: previewStore(isCustomWheel: true))
 }
 
 #Preview("Custom wheel size, out of range") {
-    NavigationStack { SettingsView(store: previewStore(isCustomWheel: true, customCircumferenceDraft: "900")) }
+    SettingsNavigationStack(store: previewStore(isCustomWheel: true, customCircumferenceDraft: "900"))
+}
+
+#Preview("Strava needs reconnecting") {
+    SettingsNavigationStack(store: previewStore(isStravaDisconnected: true))
 }
 
 #Preview("HR overrides out of range") {
-    NavigationStack { SettingsView(store: previewStore(restingOverrideDraft: "20", maxOverrideDraft: "50")) }
+    SettingsNavigationStack(store: previewStore(restingOverrideDraft: "20", maxOverrideDraft: "50"))
 }

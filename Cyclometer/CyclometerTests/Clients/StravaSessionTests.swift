@@ -65,7 +65,6 @@ struct StravaSessionTests {
         serviceType: .strava,
         keychainIdentifier: account,
         athleteID: "12345",
-        accountDisplayName: "Ada Lovelace",
         grantedScopes: ["read", "activity:write"],
         connectedAt: now.addingTimeInterval(-86_400)
     )
@@ -279,7 +278,6 @@ struct StravaSessionTests {
             serviceType: .strava,
             keychainIdentifier: Self.account,
             athleteID: "12345",
-            accountDisplayName: "Ada Lovelace",
             grantedScopes: ["read", "activity:write"],
             connectedAt: Self.now
         ))
@@ -335,6 +333,130 @@ struct StravaSessionTests {
         await #expect(throws: StravaAuthError.tokenService(status: 400)) { try await session.connect() }
         #expect(preferences.wrappedValue.connectedServices.isEmpty)
         #expect(keychain.value.isEmpty)
+    }
+
+    /// Re-granting a scope goes through connect, but the account is the same one.
+    @Test("Reconnecting the same live account keeps Connected since")
+    func reconnectKeepsConnectedSince() async throws {
+        let preferences = Self.connected()
+        let session = Self.makeSession(
+            service: TokenService(["token": Self.tokenAnswer(access: "a1", refresh: "r1", expiresAt: Self.now.addingTimeInterval(21_600), athlete: true)]),
+            preferences: preferences,
+            authorize: { state in Self.redirect("state=\(state)&code=abc&scope=read,activity:write,activity:read_all") }
+        )
+
+        let record = try await session.connect()
+
+        #expect(record.connectedAt == Self.record.connectedAt)
+        #expect(record.grantedScopes == ["read", "activity:write", "activity:read_all"])
+        #expect(preferences.wrappedValue.connectedServices == [record])
+    }
+
+    @Test("Connecting a different athlete starts Connected since again")
+    func newAthleteRestartsConnectedSince() async throws {
+        var someoneElse = Self.record
+        someoneElse.athleteID = "999"
+        let session = Self.makeSession(
+            service: TokenService(["token": Self.tokenAnswer(access: "a1", refresh: "r1", expiresAt: Self.now.addingTimeInterval(21_600), athlete: true)]),
+            preferences: Self.connected(someoneElse),
+            authorize: { state in Self.redirect("state=\(state)&code=abc&scope=read") }
+        )
+
+        #expect(try await session.connect().connectedAt == Self.now)
+    }
+
+    /// A transport that holds one endpoint's answer until the test lets it through, and says when
+    /// that call arrived. Every call is recorded, and an answer released after its caller was
+    /// cancelled throws, as URLSession does.
+    final class HeldEndpoint: Sendable {
+        let endpoint: String
+        let calls = LockIsolated<[String]>([])
+        let arrived: AsyncStream<Void>
+        private let arrivedContinuation: AsyncStream<Void>.Continuation
+        private let gate: AsyncStream<Void>
+        private let gateContinuation: AsyncStream<Void>.Continuation
+
+        init(_ endpoint: String) {
+            self.endpoint = endpoint
+            (arrived, arrivedContinuation) = AsyncStream.makeStream(of: Void.self)
+            (gate, gateContinuation) = AsyncStream.makeStream(of: Void.self)
+        }
+
+        func release() { gateContinuation.yield() }
+
+        var transport: StravaTransport {
+            StravaTransport { [self] request in
+                let url = try #require(request.url)
+                let name = url.lastPathComponent
+                calls.withValue { $0.append(name) }
+                if name == endpoint {
+                    arrivedContinuation.yield()
+                    for await _ in gate { break }
+                    try Task.checkCancellation()
+                }
+                let answer = name == "token"
+                    ? StravaSessionTests.tokenAnswer(access: "a2", refresh: "r2", expiresAt: StravaSessionTests.now.addingTimeInterval(21_600), athlete: true)
+                    : (status: 200, body: Data())
+                return (answer.body, HTTPURLResponse(url: url, statusCode: answer.status, httpVersion: nil, headerFields: nil)!)
+            }
+        }
+    }
+
+    static func makeSession(
+        held: HeldEndpoint,
+        keychain: LockIsolated<[String: Data]>,
+        preferences: Shared<AppPreferences>
+    ) -> StravaSession {
+        StravaSession(
+            transport: held.transport,
+            keychain: .inMemory(keychain),
+            now: { now },
+            preferences: preferences,
+            authorize: { state in redirect("state=\(state)&code=abc&scope=read") },
+            clearCaches: {}
+        )
+    }
+
+    /// Strava's deauthorize revokes every token the app holds for the athlete, so an exchange
+    /// that beat the revoke would get tokens the revoke then kills.
+    @Test("A connect during a disconnect exchanges its code only after the revoke answers")
+    func connectWaitsForDisconnect() async throws {
+        let held = HeldEndpoint("revoke")
+        let keychain = Self.stored(OAuthTokens(accessToken: "a1", refreshToken: "r1", expiresAt: Self.now.addingTimeInterval(3_600)))
+        let preferences = Self.connected()
+        let session = Self.makeSession(held: held, keychain: keychain, preferences: preferences)
+
+        let disconnecting = Task { try await session.disconnect() }
+        for await _ in held.arrived { break }
+        let connecting = Task { try await session.connect() }
+        await allowStrayCallsToLand()
+        #expect(held.calls.value == ["revoke"])
+
+        held.release()
+        try await disconnecting.value
+        let record = try await connecting.value
+
+        #expect(held.calls.value == ["revoke", "token"])
+        #expect(preferences.wrappedValue.connectedServices == [record])
+        #expect(try Self.tokens(in: keychain)?.accessToken == "a2")
+    }
+
+    /// The rider authorized on Strava, came back, and left S12.1 while the exchange was in flight.
+    @Test("A connect cancelled after Strava redirects back still saves the account")
+    func connectSurvivesCancellationAfterRedirect() async throws {
+        let held = HeldEndpoint("token")
+        let keychain = LockIsolated<[String: Data]>([:])
+        let preferences = Shared(value: AppPreferences())
+        let session = Self.makeSession(held: held, keychain: keychain, preferences: preferences)
+
+        let connecting = Task { try await session.connect() }
+        for await _ in held.arrived { break }
+        connecting.cancel()
+        held.release()
+        _ = try? await connecting.value
+
+        #expect(preferences.wrappedValue.connectedServices.map(\.athleteID) == ["12345"])
+        #expect(try Self.tokens(in: keychain)?.accessToken == "a2")
     }
 
     // MARK: - Disconnect

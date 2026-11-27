@@ -3370,3 +3370,52 @@ Fixtures synthesized from Strava's reference (repo is public); an opt-in live te
   time; the fixtures follow the real keys and the `-free` variants are gone. `pr_rank` decoded on the real ride (4/4).
   A first effort on a segment gets no `pr_rank` or achievement. PRD §8.12, UX S15/S20, DataModel §3.8.1 and TCA §4.15
   updated; whether `GET /segments/:id` carries the best time is left to #633.
+
+---
+
+## #629 — S12 Accounts and S12.1 Strava Account
+
+Plan: UX §S12 Accounts / §S12.1, TCA §4.15 `AccountsFeature`. Rows are one per supported service (issue), not per
+connected service (UX); Accounts sits after Cadence Zones; S12.1 is pushed on a Settings `StackState` so Disconnect
+can pop.
+
+- [x] `StravaClient.athlete` (+ StravaWire, mock, fixture, tests)
+- [x] Drop `ConnectedService.accountDisplayName` (+ decode-old-record test)
+- [x] Strava brand assets (Connect button, Powered by, row mark)
+- [x] `AccountsFeature` + `AccountsView` (S12.1)
+- [x] Settings path + Accounts section; AppView stack binding
+- [x] AccountsFeatureTests, SettingsFeatureTests, snapshots
+- [x] Docs: UX §S12/§S12.1, TCA §4.15
+- [x] Build; Brian runs on device; full CyclometerTests
+
+### Review
+
+- Built as planned, with one change: Disconnect is confirmed on S12.1 and run by `SettingsFeature`, which pops the
+  screen first. The session removes the record before it revokes, so a screen waiting on the revoke would show the
+  Connect button until Strava answered (offline, until the request timed out).
+- Row mark is Font Awesome's Strava glyph (`assets/icons`): Strava's download has no standalone logo, and its
+  guidelines don't cover list-row icons. App Review (#288) may raise it.
+- Device (Brian, 2026-11-25): connect, disconnect, reconnect, unticked scope → Permissions → Reconnect, relaunch,
+  dark mode all good.
+- Snapshots recorded on "Cyclometer Tests": 10 new `StravaAccountSnapshotTests`, 2 new `stravaNeedsReconnect`, and
+  `fullHeight` light/dark re-recorded (the Accounts section). The other 14 Settings references were unchanged. Each
+  image was checked.
+- Full CyclometerTests: 3240 passed, 4 failed. Three were `AccountsFeatureTests` connect-success tests: the scripted
+  `connect` wrote the record while `send(.connectTapped)` was still running, so TestStore expected the shared change
+  in that step. The script now waits on a buffered `AsyncStream` gate that the test opens after `send`; 160/160 over
+  10 iterations. The fourth, `RideSummaryFeatureTests/finishStatsNeverStored`, is the flake seen under #627 (reads 4
+  or 8 of 31 before `finish` returns); it also failed 2 of 5 iterations with the touched suites, and it's untouched here.
+- Touched suites × 5 iterations: SettingsFeatureTests 215/215, StravaClientTests 155/155, StravaSessionTests 95/95,
+  AppPreferencesTests 145/145.
+- Code review (/code-review, xhigh): 8 findings.
+  - Fixed: the snapshot date (pinned locale and time zone; suite skipped in CI), two comments, and DataModel.md's header.
+  - Fixed after Brian's call:
+    - A connect's code exchange waits out a disconnect in flight, since Strava's deauthorize revokes every token for
+      the athlete.
+    - Once Strava redirects back, the exchange runs in an unstructured task, so leaving S12.1 can't lose the sign-in.
+    - Reconnecting the same live account keeps "Connected since".
+  - Tests: 4 new session tests, 115/115 over 5 iterations. Each ordering test fails with its fix removed (checked,
+    then restored).
+  - Open: the photo shape (Strava draws subscribers in a shield and free athletes in a circle).
+- Photo shape (Brian, 2026-11-26): a circle for every athlete; Strava's subscriber shield isn't copied. Brian checked
+  it on device. The 6 connected references were re-recorded; StravaAccountSnapshotTests and AccountsFeatureTests pass.

@@ -11,6 +11,9 @@ import Foundation
 /// Keychain item as `isDisconnected`, or S12 shows an account as connected that can't sign a
 /// request, and the rider is never asked to reconnect.
 ///
+/// The athlete's name and photo are not kept: S12.1 fetches them each time it appears (PRD §8.12,
+/// #629). A record saved before #629 still carries `accountDisplayName`, which decoding ignores.
+///
 /// Decoded by the synthesized decoder, which throws on a missing key, `isDisconnected`'s default
 /// included. A field added later must be optional or decoded by hand, or every saved record fails
 /// to decode and every rider is silently disconnected.
@@ -22,8 +25,6 @@ struct ConnectedService: Codable, Equatable, Sendable, Identifiable {
     var keychainIdentifier: String
     /// Strava's athlete id; the routes endpoint needs it.
     var athleteID: String
-    /// The athlete's name, shown on S12, S12.1 and S10.
-    var accountDisplayName: String?
     /// The scopes the rider granted, from the OAuth callback. A feature whose scope is missing
     /// is hidden and named on S12.1 rather than failing (PRD §8.12).
     var grantedScopes: Set<String>

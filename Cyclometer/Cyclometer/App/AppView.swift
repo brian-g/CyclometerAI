@@ -58,12 +58,13 @@ struct AppView: View {
                 .tag(AppFeature.Tab.routes)
                 
                 // ── Settings ─────────────────────────────────────────────────────
-                NavigationStack {
-                    SettingsView(store: store.scope(state: \.settings, action: \.settings))
-                        .startRideToolbarItem(isHidden: store.activeRide != nil) {
-                            store.send(.startRideButtonTapped)
-                        }
-                }
+                // Brings its own stack, driven by `SettingsFeature.path`, so S12.1's Disconnect
+                // pops it (#629) — the Rides and Routes tabs' arrangement.
+                SettingsNavigationStack(
+                    store: store.scope(state: \.settings, action: \.settings),
+                    isStartRideHidden: store.activeRide != nil,
+                    onStartRide: { store.send(.startRideButtonTapped) }
+                )
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(AppFeature.Tab.settings)
             }
