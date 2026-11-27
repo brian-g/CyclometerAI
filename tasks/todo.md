@@ -3508,3 +3508,7 @@ Review (2026-11-27):
 - Full CyclometerTests: 3294 passed, 2 failed (`finishStatsNeverStored`, known; `LocationOneShotTests/
   concurrentRequestsAllResolve`, 88 s under load). Both suites pass alone (45/45). S10 references re-recorded
   and checked by eye.
+- /code-review --fix (2026-11-27): 4 fixed (name saved after finalize; cancelled connect quiet; close-out
+  mock pins the Health choice; comment). Brian on the rest: services default **off** (Health on) — PRD §8.12;
+  missing upload scope → validate at Strava sign-in, #669; failed Reconnect keeps an alert already up;
+  a save landing >60 s after S10 closed isn't uploaded — accepted, no fix.

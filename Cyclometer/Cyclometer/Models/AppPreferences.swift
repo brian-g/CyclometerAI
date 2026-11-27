@@ -154,11 +154,12 @@ struct AppPreferences: Codable, Equatable, Sendable {
     /// `SyncDestination.rawValue`.
     var syncDestinationDefaults: [SyncDestination: Bool] = [:]
 
-    /// Whether `destination` starts chosen in S10's Sync To: the rider's last choice, and on for
-    /// one never chosen (#631). `finalizeRide` reads Apple Health's, so a ride whose S10 never
-    /// closed follows it.
+    /// Whether `destination` starts chosen in S10's Sync To: the rider's last choice. Never chosen,
+    /// Apple Health is on and a service is off: nothing uploads without the rider choosing it
+    /// (PRD §8.12, #631). `finalizeRide` reads Apple Health's, so a ride whose S10 never closed
+    /// follows it.
     func isSyncChosen(_ destination: SyncDestination) -> Bool {
-        syncDestinationDefaults[destination] ?? true
+        syncDestinationDefaults[destination] ?? (destination == .appleHealth)
     }
 
     /// The sensor filling `role`, or nil when the role is unpaired. Role-keyed rather

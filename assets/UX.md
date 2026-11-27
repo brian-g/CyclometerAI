@@ -2,7 +2,7 @@
 **Version:** 0.8.2  
 **Date:** 2026-11-23
 
-**Updated:** 2026-11-27 — §S10 Sync To built (#631): capsules between Notes and Summary, as Design.sketch's Sync Options frame draws them; a disconnected service reconnects in place rather than opening S12.1; a destination never chosen starts on. The Locked state waits for #667.  
+**Updated:** 2026-11-27 — §S10 Sync To built (#631): capsules between Notes and Summary, as Design.sketch's Sync Options frame draws them; a disconnected service reconnects in place rather than opening S12.1; never chosen, Apple Health starts on and a service off. The Locked state waits for #667.  
 **Updated:** 2026-11-25 — §S12 Accounts and §S12.1 built (#629): one row per supported service (Strava), after Cadence Zones; S12.1's Permissions copy.  
 **Updated:** 2026-11-25 — Strava screens checked against Design.sketch (#637). §S05.2 and §S19: routes in source tabs, **Local** then one per connected service; a Strava route is a cache, chosen or opened, never imported (PRD §8.12). §S15: the Strava Segments row opens the new §S15.1 sheet of efforts, and Synced To is one capsule per destination, replacing the row-per-destination Sync section. §S20: Strava segments dropped from Phase 2. §S12.1: drawn, and Disconnect also removes Strava routes.
 **Updated:** 2026-11-23 — §S10 includes the services to sync section.
@@ -1197,7 +1197,7 @@ A full-height sheet titled **Finish Ride**, presented when the rider confirms Fi
 
 - One toggle capsule for **Apple Health**, first, then one per service with an account: the destination's mark, and its name. With no service connected the section is Apple Health alone. On the page, not in a card, between Notes and Summary; one row, or one capsule per line when they don't fit
 - A service whose account is disconnected shows a "􁅥" (`point.3.filled.connected.trianglepath.dotted`) in place of its mark, drawn unselected. Tapping it reconnects in place, the same sign-in as S12.1's Reconnect, and selects it for this ride (#631). Until then it isn't sent, and its remembered choice is kept
-- Each toggle defaults to the rider's last choice for that destination, remembered in AppPreferences when S10 closes; a destination never chosen defaults on
+- Each toggle defaults to the rider's last choice for that destination, remembered in AppPreferences when S10 closes. Never chosen, Apple Health is on and a service is off: nothing uploads without the rider's choice (PRD §8.12)
 - A selected capsule is `primaryDark` for every destination, with `textOnPrimary` for its symbol and name (Brian, #637). Not each service's brand color: Strava's brand guidelines keep Strava orange to Strava's own marks (PRD §8.12)
 - Each capsule should use a symbol before the name of the service. Apple Health: figure.run, Strava: cyclometer.brands.strava-icon, Ride with GPS: cyclometer.brands.ride-with-gps-icon, Trailforks: tbd, Tribos studio: tbd. Built (#631): Strava uses the `stravaMark` template asset until `cyclometer.brands.strava-icon` exists
 - **Strava** uploads when S10 closes, by Finish Ride or a swipe, so the name and description edited above go with it. The upload runs in the app, not the sheet: closing S10 never cancels it

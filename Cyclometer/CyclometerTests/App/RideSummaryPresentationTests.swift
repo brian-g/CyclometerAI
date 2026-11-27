@@ -319,7 +319,10 @@ struct RideSummaryPresentationTests {
         let records = LockIsolated<[UUID]>([])
         let store = makeStore(
             presenting(title: "Hill Repeats"),
-            seed: { $0.connectedServices = [Self.stravaNoUploadScope] },
+            seed: {
+                $0.connectedServices = [Self.stravaNoUploadScope]
+                $0.syncDestinationDefaults = [.service(.strava): true]
+            },
             persistenceClient: .mock(onSaveSyncRecord: { id, _ in records.withValue { $0.append(id) } })
         )
         store.exhaustivity = .off
@@ -336,6 +339,23 @@ struct RideSummaryPresentationTests {
         #expect(store.state.preferences.syncDestinationDefaults == [.appleHealth: true, .service(.strava): true])
     }
 
+    @Test("a service never chosen starts off, so a swipe sends the ride nowhere but Apple Health")
+    func stravaNeverChosenNotQueued() async {
+        let records = LockIsolated(0)
+        let store = makeStore(
+            presenting(title: "Morning Loop", persistedTitle: "Morning Loop"),
+            seed: { $0.connectedServices = [Self.stravaNoUploadScope] },
+            persistenceClient: .mock(onSaveSyncRecord: { _, _ in records.withValue { $0 += 1 } })
+        )
+        store.exhaustivity = .off
+
+        await store.send(.rideSummary(.dismiss))
+        await store.finish()
+
+        #expect(records.value == 0)
+        #expect(store.state.preferences.syncDestinationDefaults == [.appleHealth: true, .service(.strava): false])
+    }
+
     @Test("with Strava turned off, nothing is queued, and off is remembered")
     func stravaOffNotQueued() async {
         let records = LockIsolated(0)
@@ -346,7 +366,10 @@ struct RideSummaryPresentationTests {
         }
         let store = makeStore(
             state,
-            seed: { $0.connectedServices = [Self.stravaNoUploadScope] },
+            seed: {
+                $0.connectedServices = [Self.stravaNoUploadScope]
+                $0.syncDestinationDefaults = [.service(.strava): true]
+            },
             persistenceClient: .mock(onSaveSyncRecord: { _, _ in records.withValue { $0 += 1 } })
         )
         store.exhaustivity = .off

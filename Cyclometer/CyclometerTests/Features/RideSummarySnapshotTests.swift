@@ -137,7 +137,7 @@ final class RideSummarySnapshotTests: XCTestCase {
     /// capsule filled, one not.
     func testRideSummarySyncTo() {
         assertBothSchemes(screen(stats: Self.gpsOnlyStats, connectedServices: [Self.strava()],
-                                 syncDestinationDefaults: [.appleHealth: false]),
+                                 syncDestinationDefaults: [.appleHealth: false, .service(.strava): true]),
                           named: "sync-to")
     }
 

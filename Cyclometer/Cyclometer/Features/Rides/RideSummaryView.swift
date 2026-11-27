@@ -365,7 +365,8 @@ private func previewStrava(isDisconnected: Bool = false) -> ConnectedService {
 
 /// Strava connected, chosen as last time, and Apple Health left off last time (#631).
 #Preview("Ride Summary — Sync To") {
-    previewList(connectedServices: [previewStrava()], syncDestinationDefaults: [.appleHealth: false])
+    previewList(connectedServices: [previewStrava()],
+                syncDestinationDefaults: [.appleHealth: false, .service(.strava): true])
 }
 
 /// Strava revoked access: its capsule offers Reconnect (#631).

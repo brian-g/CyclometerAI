@@ -354,7 +354,9 @@ struct RideSummaryFeature {
                 case .cancelled:
                     return .none
                 case .failed:
-                    state.alert = .stravaConnectFailed
+                    // Logged in `connectOutcome`. An alert already up wins: the unsaved-track
+                    // notice (#345) is shown once, and its record is gone.
+                    if state.alert == nil { state.alert = .stravaConnectFailed }
                     return .none
                 }
 

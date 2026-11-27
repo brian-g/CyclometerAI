@@ -651,13 +651,13 @@ struct RideSummaryFeatureTests {
         return client
     }
 
-    @Test("with no choice remembered, Apple Health and every connected service start chosen")
-    func syncDefaultsOn() {
+    @Test("with no choice remembered, Apple Health starts chosen and a service doesn't: nothing uploads unchosen")
+    func syncDefaults() {
         let store = makeStore(persistenceClient: .mock(), seed: { $0.connectedServices = [Self.strava()] })
 
         #expect(store.state.syncRows == [
             RideSummaryFeature.SyncRow(destination: .appleHealth, isChosen: true, needsReconnect: false),
-            RideSummaryFeature.SyncRow(destination: .service(.strava), isChosen: true, needsReconnect: false),
+            RideSummaryFeature.SyncRow(destination: .service(.strava), isChosen: false, needsReconnect: false),
         ])
     }
 
@@ -681,7 +681,10 @@ struct RideSummaryFeatureTests {
 
     @Test("a disconnected service shows, offering Reconnect, and isn't among what closing commits")
     func syncDisconnectedRow() {
-        let store = makeStore(persistenceClient: .mock(), seed: { $0.connectedServices = [Self.strava(isDisconnected: true)] })
+        let store = makeStore(persistenceClient: .mock(), seed: {
+            $0.connectedServices = [Self.strava(isDisconnected: true)]
+            $0.syncDestinationDefaults = [.service(.strava): true]
+        })
 
         #expect(store.state.syncRows.last == RideSummaryFeature.SyncRow(
             destination: .service(.strava), isChosen: true, needsReconnect: true
@@ -694,10 +697,10 @@ struct RideSummaryFeatureTests {
         let store = makeStore(persistenceClient: .mock(), seed: { $0.connectedServices = [Self.strava()] })
 
         await store.send(.syncDestinationTapped(.service(.strava))) {
-            $0.syncToggles[.service(.strava)] = false
+            $0.syncToggles[.service(.strava)] = true
         }
         await store.send(.syncDestinationTapped(.service(.strava))) {
-            $0.syncToggles[.service(.strava)] = true
+            $0.syncToggles[.service(.strava)] = false
         }
         await store.send(.syncDestinationTapped(.appleHealth)) {
             $0.syncToggles[.appleHealth] = false
@@ -756,6 +759,27 @@ struct RideSummaryFeatureTests {
         await store.receive(\.reconnectFinished) {
             $0.isReconnecting = false
             $0.alert = .stravaConnectFailed
+        }
+    }
+
+    @Test("a failed Reconnect leaves an alert already up, such as the one-time unsaved-track notice (#345)")
+    func syncReconnectFailedKeepsAlert() async {
+        let store = makeStore(
+            persistenceClient: .mock(),
+            load: .loaded,
+            seed: { $0.connectedServices = [Self.strava(isDisconnected: true)] },
+            stravaAuth: Self.connecting(.failure(.tokenService(status: 500)))
+        )
+        // Any alert stands in for the notice: Delete's is the one a test can raise directly.
+        await store.send(.deleteTapped) {
+            $0.alert = RideSummaryFeature.deleteAlert
+        }
+
+        await store.send(.syncDestinationTapped(.service(.strava))) {
+            $0.isReconnecting = true
+        }
+        await store.receive(\.reconnectFinished) {
+            $0.isReconnecting = false
         }
     }
 
