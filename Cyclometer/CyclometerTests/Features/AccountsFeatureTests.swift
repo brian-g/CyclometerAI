@@ -122,6 +122,7 @@ struct AccountsFeatureTests {
             $0.isConnecting = false
             $0.$preferences.withLock { $0.connectedServices = [Self.record()] }
         }
+        await store.receive(\.delegate.connected)
         await store.receive(\.athleteFetched) { $0.athlete = Self.ada }
         #expect(store.state.account == Self.record())
     }
@@ -163,6 +164,7 @@ struct AccountsFeatureTests {
             $0.isConnecting = false
             $0.$preferences.withLock { $0.connectedServices = [Self.record()] }
         }
+        await store.receive(\.delegate.connected)
         await store.receive(\.athleteFetched) { $0.athlete = Self.ada }
     }
 
@@ -179,6 +181,7 @@ struct AccountsFeatureTests {
             $0.isConnecting = false
             $0.$preferences.withLock { $0.connectedServices = [Self.record()] }
         }
+        await store.receive(\.delegate.connected)
         await store.receive(\.athleteFetched) { $0.athlete = Self.ada }
         #expect(store.state.missingPermissions.isEmpty)
     }

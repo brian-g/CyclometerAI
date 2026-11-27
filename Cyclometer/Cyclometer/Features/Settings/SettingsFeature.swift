@@ -243,6 +243,8 @@ struct SettingsFeature {
         enum Delegate: Equatable {
             /// A ride already running starts or ends its Live Activity to match (#313).
             case liveActivityToggled
+            /// S12.1 connected or reconnected Strava: `AppFeature` resumes the upload queue (#630).
+            case stravaConnected
             #if DEBUG
             /// S12.1's debug upload, for `AppFeature`'s queue. #631 replaces it with S10's Sync To.
             case debugUploadLatestRide
@@ -413,6 +415,8 @@ struct SettingsFeature {
                 state.$riderProfile.withLock { $0 = updated }
                 state.maxOverrideDraft = nil
                 return .none
+            case .path(.element(id: _, action: .stravaAccount(.delegate(.connected)))):
+                return .send(.delegate(.stravaConnected))
             #if DEBUG
             case .path(.element(id: _, action: .stravaAccount(.delegate(.debugUploadLatestRide)))):
                 return .send(.delegate(.debugUploadLatestRide))

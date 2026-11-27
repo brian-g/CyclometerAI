@@ -73,6 +73,10 @@ struct AccountsFeature {
         enum Delegate: Equatable {
             /// The rider confirmed Disconnect. The parent pops this screen and disconnects.
             case disconnectConfirmed
+            /// A connect or Reconnect finished: uploads waiting on Strava can go (#630). Sent from
+            /// here because `StravaSession` writes the record outside any reducer, where the
+            /// parent's `.onChange` would never see it change.
+            case connected
             #if DEBUG
             /// Sends the newest ride to Strava through `SyncQueueFeature` (#630), so an upload can be
             /// checked on device before S10's Sync To exists. #631 replaces it.
@@ -111,7 +115,7 @@ struct AccountsFeature {
                 state.isConnecting = false
                 switch outcome {
                 case .connected:
-                    return fetchAthlete()
+                    return .merge(.send(.delegate(.connected)), fetchAthlete())
                 case .cancelled:
                     return .none
                 case .failed:

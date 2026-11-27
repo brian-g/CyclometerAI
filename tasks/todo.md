@@ -3458,3 +3458,8 @@ Review (2026-11-27):
   out under load) → `finish(timeout: 30 s)`, suite green. S12.1's DEBUG trigger moved from the toolbar (iOS 27
   snapshots draw it) to a long-press on the athlete card. Queue tests advance the clock exactly instead of
   `clock.run()` (0.5 s wall budget).
+- /code-review --fix: connect/Reconnect resumes the queue through S12.1's `connected` delegate (the `.onChange`
+  couldn't see `StravaSession`'s write); resume sends rides one at a time, oldest first, stopping at a 429, each
+  re-reading its record; a failed save after Strava has the file keeps the upload id. Skipped, open: retry only
+  on `.active` (no timer for `heldUntil` or backoff), `heldUntil` not persisted across launches, default
+  reason wording (#632), clock-advance race in queue tests (not seen).

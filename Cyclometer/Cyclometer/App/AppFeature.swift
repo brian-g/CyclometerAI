@@ -620,11 +620,17 @@ struct AppFeature {
                 guard state.activeRide != nil else { return .none }
                 return .send(.activeRide(.liveActivity(.preferenceChanged)))
 
+            case .settings(.delegate(.stravaConnected)):
+                // A connect, or a Reconnect that granted the upload scope, sends what was waiting on
+                // it (#630); `resume` holds without the scope. Uploads waiting on Strava stay pending
+                // until then (PRD §8.12).
+                return .send(.syncQueue(.resume))
+
             #if DEBUG
             case .settings(.delegate(.debugUploadLatestRide)):
                 // #631 replaces this with S10's Sync To.
                 return .run { [persistenceClient] send in
-                    guard let latest = try await persistenceClient.fetchRides().first else { return }
+                    guard let latest = try? await persistenceClient.fetchRides().first else { return }
                     await send(.syncQueue(.enqueue(rideId: latest.id)))
                 }
             #endif
@@ -655,13 +661,6 @@ struct AppFeature {
         .onChange(of: \.isDashboardVisible) { _, isVisible in
             Reduce { _, _ in
                 .send(.screenVisibilityChanged(isVisible))
-            }
-        }
-        // A connect, or a Reconnect that granted the upload scope, sends what was waiting on it
-        // (#630). Uploads waiting on Strava stay pending until then (PRD §8.12).
-        .onChange(of: \.preferences.canUploadToStrava) { _, canUpload in
-            Reduce { _, _ in
-                canUpload ? .send(.syncQueue(.resume)) : .none
             }
         }
     }

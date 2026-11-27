@@ -70,17 +70,7 @@ struct SyncQueueFeature {
                     }
                 }
                 state.inFlight.insert(rideId)
-                return .run { [strava, persistenceClient, clock, date] send in
-                    var heldUntil: Date?
-                    if let record = await Self.startingRecord(rideId: rideId, persistenceClient: persistenceClient) {
-                        let job = StravaUploadJob(
-                            rideId: rideId, strava: strava, persistenceClient: persistenceClient, clock: clock,
-                            now: { date.now }
-                        )
-                        heldUntil = await job.run(from: record)
-                    }
-                    await send(.jobFinished(rideId: rideId, heldUntil: heldUntil))
-                }
+                return upload([rideId])
 
             case .resume:
                 guard holdReason(state) == nil else { return .none }
@@ -95,11 +85,13 @@ struct SyncQueueFeature {
             case .owedFetched(let owed):
                 // Read again: the fetch was a suspension, and a 429 can have landed meanwhile.
                 guard holdReason(state) == nil else { return .none }
-                let jobs = owed.filter { $0.record.service == .strava && !state.inFlight.contains($0.rideId) }
-                guard !jobs.isEmpty else { return .none }
-                logger.info("strava resume: \(jobs.count, privacy: .public) upload(s)")
-                state.inFlight.formUnion(jobs.map(\.rideId))
-                return .merge(jobs.map { job(rideId: $0.rideId, record: $0.record) })
+                let rideIds = owed
+                    .filter { $0.record.service == .strava && !state.inFlight.contains($0.rideId) }
+                    .map(\.rideId)
+                guard !rideIds.isEmpty else { return .none }
+                logger.info("strava resume: \(rideIds.count, privacy: .public) upload(s)")
+                state.inFlight.formUnion(rideIds)
+                return upload(rideIds)
 
             case let .jobFinished(rideId, heldUntil):
                 state.inFlight.remove(rideId)
@@ -119,10 +111,10 @@ struct SyncQueueFeature {
         return nil
     }
 
-    /// Where an enqueued ride's upload starts: the record it's owed from, so an upload id carries
-    /// on polling, or a fresh pending one. Nil for a ride already on Strava: Strava doesn't catch
-    /// the same GPX sent twice, so a second upload would be a second activity. Nil too for a ride
-    /// that's gone or can't be read.
+    /// Where a ride's upload starts, read as it starts: the record it's owed from, so an upload id
+    /// carries on polling, or a fresh pending one. Nil for a ride already on Strava: Strava doesn't
+    /// catch the same GPX sent twice, so a second upload would be a second activity. Nil too for a
+    /// ride that's gone or can't be read.
     private static func startingRecord(rideId: UUID, persistenceClient: PersistenceClient) async -> RideSyncRecord? {
         let existing: RideSyncRecord?
         do {
@@ -139,13 +131,25 @@ struct SyncQueueFeature {
         return RideSyncRecord(service: .strava, status: .pending)
     }
 
-    private func job(rideId: UUID, record: RideSyncRecord) -> Effect<Action> {
+    /// Sends the rides one at a time, in the order given (`resume`'s is oldest first), so a 429
+    /// stops the rest rather than each of them spending another request of the app's shared
+    /// limit. Each starts from its record as it stands once the ride is in flight, not from what
+    /// `resume` read: a job that settled the ride in between leaves it synced, and isn't repeated.
+    private func upload(_ rideIds: [UUID]) -> Effect<Action> {
         .run { [strava, persistenceClient, clock, date] send in
-            let job = StravaUploadJob(
-                rideId: rideId, strava: strava, persistenceClient: persistenceClient, clock: clock, now: { date.now }
-            )
-            let heldUntil = await job.run(from: record)
-            await send(.jobFinished(rideId: rideId, heldUntil: heldUntil))
+            var isHeld = false
+            for rideId in rideIds {
+                var heldUntil: Date?
+                // After a 429 the rest only leave `inFlight`; their records wait for the next `resume`.
+                if !isHeld, let record = await Self.startingRecord(rideId: rideId, persistenceClient: persistenceClient) {
+                    let job = StravaUploadJob(
+                        rideId: rideId, strava: strava, persistenceClient: persistenceClient, clock: clock, now: { date.now }
+                    )
+                    heldUntil = await job.run(from: record)
+                    isHeld = heldUntil != nil
+                }
+                await send(.jobFinished(rideId: rideId, heldUntil: heldUntil))
+            }
         }
     }
 }
@@ -157,7 +161,9 @@ extension AppPreferences {
     }
 
     /// Strava can take uploads: connected, with the upload scope granted. `AppFeature` resumes the
-    /// queue when this turns true, after a connect or a Reconnect that granted the scope.
+    /// queue on `.active` only while this is true. A connect or a Reconnect resumes it through
+    /// S12.1's `connected` delegate instead: `StravaSession` writes the record outside any
+    /// reducer, where `.onChange` can't see this turn true.
     var canUploadToStrava: Bool {
         stravaAccount?.grantedScopes.contains(StravaConfig.uploadScope) ?? false
     }
@@ -192,9 +198,9 @@ private struct StravaUploadJob {
         var record = start
         do {
             if record.remoteUploadId == nil {
-                record = try await upload(record)
+                try await upload(&record)
             }
-            try await poll(&record)
+            try await poll(record)
             return nil
         } catch is CancellationError {
             // The record stands as last written; the next launch resumes it.
@@ -207,9 +213,10 @@ private struct StravaUploadJob {
         }
     }
 
-    /// `uploading`, the GPX up, then `processing` with Strava's upload id.
-    private func upload(_ record: RideSyncRecord) async throws -> RideSyncRecord {
-        var record = record
+    /// `uploading`, the GPX up, then `processing` with Strava's upload id. The id is in `record`
+    /// before it's saved, so a save that fails still leaves it for `recordWaiting`: Strava has the
+    /// file, and sending it again would make a second activity.
+    private func upload(_ record: inout RideSyncRecord) async throws {
         record.status = .uploading
         record.errorMessage = nil
         try await save(record)
@@ -228,13 +235,15 @@ private struct StravaUploadJob {
         record.remoteUploadId = uploadID.rawValue
         try await save(record)
         logger.info("strava upload: processing")
-        return record
     }
 
     /// Polls until Strava settles the upload, or the two minutes run out. Out of time, the record
-    /// stays `processing` with its upload id, polled again at the next `resume`.
-    private func poll(_ record: inout RideSyncRecord) async throws {
-        guard let rawID = record.remoteUploadId else { return }
+    /// stays `processing` with its upload id, polled again at the next `resume`. Settles a copy:
+    /// when its save fails, `run` still holds the `processing` record and its upload id, so
+    /// `recordWaiting` leaves it to be polled again rather than sent again.
+    private func poll(_ processing: RideSyncRecord) async throws {
+        guard let rawID = processing.remoteUploadId else { return }
+        var record = processing
         let uploadID = StravaUploadID(rawValue: rawID)
         for delay in SyncQueueFeature.pollDelays {
             try await clock.sleep(for: delay)

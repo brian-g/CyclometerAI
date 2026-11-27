@@ -36,7 +36,8 @@ struct SyncQueueFeatureTests {
         strava: StravaClient,
         log: Log,
         owed: [OwedSync] = [],
-        syncRecords: [UUID: [RideSyncRecord]] = [:],
+        /// The records `startingRecord` reads. Defaults to `owed`'s, as the store would hold them.
+        syncRecords: [UUID: [RideSyncRecord]]? = nil,
         clock: TestClock<Duration> = TestClock(),
         initialState: (inout SyncQueueFeature.State) -> Void = { _ in }
     ) -> TestStoreOf<SyncQueueFeature> {
@@ -57,7 +58,7 @@ struct SyncQueueFeatureTests {
                 $0.persistenceClient = .mock(
                     rideExportMetadata: [Self.rideId: Self.metadata, Self.otherRideId: Self.metadata],
                     ridesOwedSync: owed,
-                    syncRecords: syncRecords,
+                    syncRecords: syncRecords ?? Dictionary(owed.map { ($0.rideId, [$0.record]) }, uniquingKeysWith: +),
                     onSaveSyncRecord: { _, record in log.records.withValue { $0.append(record) } }
                 )
                 $0.strava = strava
@@ -245,7 +246,9 @@ struct SyncQueueFeatureTests {
         await store.send(.enqueue(rideId: Self.otherRideId))
         await store.finish()
         #expect(log.uploads.value.isEmpty)
-        #expect(log.records.value.last == RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.rateLimited))
+        // The held enqueue writes its own waiting record, the same as the first ride's.
+        let waiting = RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.rateLimited)
+        #expect(log.records.value == [Self.uploading, waiting, waiting])
     }
 
     @Test("A poll Strava answers 404 drops the upload id and goes back to pending, to send again")
@@ -357,7 +360,7 @@ struct SyncQueueFeatureTests {
 
     // MARK: - Resuming
 
-    @Test("At relaunch a pending record is uploaded and a processing one is only polled")
+    @Test("At relaunch a pending record is uploaded and a processing one is only polled, one ride at a time")
     func relaunchResumes() async {
         let log = Log()
         let clock = TestClock()
@@ -375,12 +378,73 @@ struct SyncQueueFeatureTests {
         await store.send(.resume)
         await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId, Self.otherRideId] }
         await clock.advance(by: .seconds(1))
-        await store.receive(\.jobFinished)
-        await store.receive(\.jobFinished)
+        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil))
+        #expect(log.polls.value == 1)
+        await clock.advance(by: .seconds(1))
+        await store.receive(.jobFinished(rideId: Self.otherRideId, heldUntil: nil))
 
         #expect(store.state.inFlight.isEmpty)
         #expect(log.uploads.value.map(\.externalID) == [Self.rideId.uuidString])
         #expect(log.records.value.filter { $0.status == .synced } == [Self.synced("555"), Self.synced("555")])
+    }
+
+    @Test("A 429 during a resume stops the rides after it, which keep their records for the next resume")
+    func resumeStopsAtRateLimit() async {
+        let log = Log()
+        let until = Self.now.addingTimeInterval(900)
+        let pending = RideSyncRecord(service: .strava, status: .pending)
+        let store = makeStore(
+            strava: strava(statuses: [], log: log) { throw StravaError.rateLimited(until: until) },
+            log: log,
+            owed: [OwedSync(rideId: Self.rideId, record: pending), OwedSync(rideId: Self.otherRideId, record: pending)]
+        )
+
+        await store.send(.resume)
+        await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId, Self.otherRideId] }
+        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: until)) {
+            $0.inFlight = [Self.otherRideId]
+            $0.heldUntil = until
+        }
+        await store.receive(.jobFinished(rideId: Self.otherRideId, heldUntil: nil)) { $0.inFlight = [] }
+
+        #expect(log.records.value == [
+            Self.uploading, RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.rateLimited),
+        ])
+    }
+
+    @Test("A ride a job settled after the resume read it isn't sent again")
+    func resumeRereadsTheRecord() async {
+        let log = Log()
+        let store = makeStore(
+            strava: strava(statuses: [], log: log), log: log,
+            owed: [OwedSync(rideId: Self.rideId, record: RideSyncRecord(service: .strava, status: .pending))],
+            syncRecords: [Self.rideId: [Self.synced("555")]]
+        )
+
+        await store.send(.resume)
+        await store.receive(\.owedFetched) { $0.inFlight = [Self.rideId] }
+        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+
+        #expect(log.uploads.value.isEmpty)
+        #expect(log.records.value.isEmpty)
+    }
+
+    @Test("A synced record whose save fails stays processing with its upload id, to be polled, not sent, again")
+    func failedSettleSaveKeepsUploadID() async {
+        let log = Log()
+        let clock = TestClock()
+        let store = makeStore(strava: strava(statuses: [.ready(activityID: "999")], log: log), log: log, clock: clock)
+        store.dependencies.persistenceClient.saveSyncRecord = { _, record in
+            if record.status == .synced { throw CocoaError(.fileWriteOutOfSpace) }
+            log.records.withValue { $0.append(record) }
+        }
+
+        await store.send(.enqueue(rideId: Self.rideId)) { $0.inFlight = [Self.rideId] }
+        await clock.advance(by: .seconds(1))
+        await store.receive(.jobFinished(rideId: Self.rideId, heldUntil: nil)) { $0.inFlight = [] }
+
+        #expect(log.uploads.value.count == 1)
+        #expect(log.records.value == [Self.uploading, Self.processing(), Self.processing(reason: SyncReason.rideUnreadable)])
     }
 
     @Test("A ride already in flight isn't run twice, by enqueue or resume")
