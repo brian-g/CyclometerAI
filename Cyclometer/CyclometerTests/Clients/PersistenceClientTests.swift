@@ -562,6 +562,79 @@ struct PersistenceClientTests {
         }
     }
 
+    // MARK: - Sync records (#630)
+
+    @Test("saveSyncRecord keeps isSyncOwed in step with the record's status, replacing the service's earlier record")
+    func saveSyncRecordKeepsOwedFlag() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(timeIntervalSince1970: 1_000_000), nil)
+
+        for status in [SyncStatus.pending, .uploading, .processing, .synced, .failed] {
+            try await client.saveSyncRecord(rideId, RideSyncRecord(service: .strava, status: status))
+            let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+            #expect(ride.isSyncOwed == status.isOwed, "\(status)")
+            #expect(ride.syncRecords.map(\.status) == [status])
+        }
+    }
+
+    @Test("fetchRidesOwedSync is oldest first, leaves out settled records and unfinished rides")
+    func owedSyncOldestFirst() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        let older = UUID(), newer = UUID(), synced = UUID(), inProgress = UUID()
+        for (offset, id) in [newer, older, synced].enumerated() {
+            // Started in the reverse of their ids' order, so sorting by insertion can't pass.
+            try await client.createRide(id, base.addingTimeInterval(TimeInterval(-offset) * 3_600), nil)
+            try await client.finalizeRide(id, base.addingTimeInterval(86_400), RideSummaryUpdate(
+                rideId: id, recordingState: .ended,
+                durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 2, maxSpeedMPS: 3
+            ), nil)
+        }
+        try await client.createRide(inProgress, base, nil)
+
+        let processing = RideSyncRecord(service: .strava, status: .processing, remoteUploadId: "42")
+        try await client.saveSyncRecord(newer, processing)
+        try await client.saveSyncRecord(older, RideSyncRecord(service: .strava, status: .pending))
+        try await client.saveSyncRecord(synced, RideSyncRecord(service: .strava, status: .synced, remoteActivityId: "9"))
+        try await client.saveSyncRecord(inProgress, RideSyncRecord(service: .strava, status: .pending))
+
+        #expect(try await client.fetchRidesOwedSync() == [
+            OwedSync(rideId: older, record: RideSyncRecord(service: .strava, status: .pending)),
+            OwedSync(rideId: newer, record: processing),
+        ])
+    }
+
+    @Test("saveSyncRecord on a ride deleted mid-upload is a no-op")
+    func saveSyncRecordUnknownRide() async throws {
+        let (client, _) = Self.makeLiveClient()
+        try await client.saveSyncRecord(UUID(), RideSyncRecord(service: .strava, status: .synced))
+        #expect(try await client.fetchRidesOwedSync().isEmpty)
+    }
+
+    @Test("fetchSyncRecord reads the ride's record for one service: nil before any, then the saved one")
+    func fetchSyncRecordReadsService() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(timeIntervalSince1970: 1_000_000), nil)
+        #expect(try await client.fetchSyncRecord(rideId, .strava) == nil)
+
+        let synced = RideSyncRecord(service: .strava, status: .synced, remoteActivityId: "555")
+        try await client.saveSyncRecord(rideId, synced)
+        #expect(try await client.fetchSyncRecord(rideId, .strava) == synced)
+
+        await #expect(throws: PersistenceError.rideNotFound) { try await client.fetchSyncRecord(UUID(), .strava) }
+    }
+
+    @Test("fetchRide carries the ride's notes, the Strava upload's description")
+    func fetchRideCarriesNotes() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = UUID()
+        try await client.createRide(rideId, Date(timeIntervalSince1970: 1_000_000), nil)
+        try await client.updateRideNotes(rideId, "Headwind both ways")
+        #expect(try await client.fetchRide(rideId).notes == "Headwind both ways")
+    }
+
     // MARK: - Ride read path (#173, for GPXExporter)
 
     @Test("fetchRide returns the ride's title and startedAt")

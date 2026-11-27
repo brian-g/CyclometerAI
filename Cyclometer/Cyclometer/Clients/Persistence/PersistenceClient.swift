@@ -61,6 +61,16 @@ struct PersistenceClient: Sendable {
     var fetchRidesOwedFinishStats: @Sendable () async throws -> [OwedFinishStats]
     /// Stores a ride's finish stats worked out from its saved track, and marks it no longer owed.
     var saveRideFinishStats: @Sendable (UUID, RideFinishStats) async throws -> Void
+    /// Finished rides' sync records still pending, uploading or processing, oldest ride first:
+    /// what `SyncQueueFeature` resumes at launch (#630). A ride whose track isn't on hand is left
+    /// out, as for the backfills above: its GPX would be empty.
+    var fetchRidesOwedSync: @Sendable () async throws -> [OwedSync]
+    /// A ride's record for one service, nil when it was never sent there: what `enqueue` reads so
+    /// a ride already on Strava isn't sent again (#630). Throws `rideNotFound` for a deleted ride.
+    var fetchSyncRecord: @Sendable (UUID, ExternalService) async throws -> RideSyncRecord?
+    /// Writes a ride's record for one service, replacing the one it had (#630). A no-op for a
+    /// ride deleted while its upload ran.
+    var saveSyncRecord: @Sendable (UUID, RideSyncRecord) async throws -> Void
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -175,6 +185,11 @@ extension PersistenceClient: DependencyKey {
                 try await ridesWithTrackOnHand(try await stores.rideActor.ridesOwedFinishStats(), rideId: \.rideId, stores: stores)
             },
             saveRideFinishStats: { try await stores.rideActor.saveFinishStats(id: $0, stats: $1) },
+            fetchRidesOwedSync: {
+                try await ridesWithTrackOnHand(try await stores.rideActor.ridesOwedSync(), rideId: \.rideId, stores: stores)
+            },
+            fetchSyncRecord: { try await stores.rideActor.syncRecord(id: $0, service: $1) },
+            saveSyncRecord: { try await stores.rideActor.saveSyncRecord(id: $0, record: $1) },
             appendVehiclePassEvents: { try await stores.rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await stores.rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: stores.rideActor, container: stores.trackContainer) },
@@ -244,6 +259,9 @@ extension PersistenceClient: DependencyKey {
         settleRideHealthWorkout: { _ in },
         fetchRidesOwedFinishStats: { [] },
         saveRideFinishStats: { _, _ in },
+        fetchRidesOwedSync: { [] },
+        fetchSyncRecord: { _, _ in nil },
+        saveSyncRecord: { _, _ in },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },

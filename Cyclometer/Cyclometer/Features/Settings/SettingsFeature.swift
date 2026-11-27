@@ -243,6 +243,10 @@ struct SettingsFeature {
         enum Delegate: Equatable {
             /// A ride already running starts or ends its Live Activity to match (#313).
             case liveActivityToggled
+            #if DEBUG
+            /// S12.1's debug upload, for `AppFeature`'s queue. #631 replaces it with S10's Sync To.
+            case debugUploadLatestRide
+            #endif
         }
     }
     var body: some ReducerOf<Self> {
@@ -409,6 +413,10 @@ struct SettingsFeature {
                 state.$riderProfile.withLock { $0 = updated }
                 state.maxOverrideDraft = nil
                 return .none
+            #if DEBUG
+            case .path(.element(id: _, action: .stravaAccount(.delegate(.debugUploadLatestRide)))):
+                return .send(.delegate(.debugUploadLatestRide))
+            #endif
             case let .path(.element(id: id, action: .stravaAccount(.delegate(.disconnectConfirmed)))):
                 // Pops first, and disconnects here rather than in S12.1, whose effects end with it:
                 // the revoke is a network call, and the account is gone before it answers.

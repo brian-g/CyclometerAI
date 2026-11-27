@@ -3419,3 +3419,42 @@ can pop.
   - Open: the photo shape (Strava draws subscribers in a shield and free athletes in a circle).
 - Photo shape (Brian, 2026-11-26): a circle for every athlete; Strava's subscriber shield isn't copied. Brian checked
   it on device. The 6 connected references were re-recorded; StravaAccountSnapshotTests and AccountsFeatureTests pass.
+
+---
+
+## #630 — Strava upload: SyncQueueFeature
+
+Plan approved 2026-11-26. Spec: PRD §8.12 "Uploading", TCA §4.15.
+
+- [x] `RideSyncRecord.remoteUploadId` (a `processing` record resumes polling) and `Ride.isSyncOwed`
+  (the resume's predicate; records live in a blob), written together by `saveSyncRecord`
+- [x] `PersistenceClient.fetchRidesOwedSync` / `saveSyncRecord`; `RideExportMetadata.notes` (the description)
+- [x] `SyncQueueFeature` (`Features/Rides/`): enqueue, resume, poll 1/2/4/8 s for 2 min, `SyncFailure` error table
+- [x] `AppFeature`: scoped; resume on each `.active` (not `.task`, whose `finish()` cancels) and when
+  `canUploadToStrava` turns true
+- [x] DEBUG "Upload Latest Ride" on S12.1, in the toolbar (iOS 27 snapshots don't draw it, so no reference
+  re-records for a throwaway). #631 deletes it
+- [x] Tests written: SyncQueueFeatureTests (14), PersistenceClient sync (4), migration (1); compile clean
+- [ ] Brian: device upload, duplicate, kill-resume
+- [ ] Test run, then commit + PR
+
+Notes:
+- Planned `Features/Sync/`; put in `Features/Rides/` instead, beside the other ride features, no new folder.
+- `errorMessage` reasons are English strings in the store (`SyncReason`). #632 decides whether S15 shows
+  them or maps status to its own copy.
+- A ride enqueued while held (no account, no scope, 429) is written `pending` with the reason, no job.
+- Device run 2026-11-26: upload works. A second tap made a second Strava activity: Strava doesn't catch the
+  same GPX sent twice, so `enqueue` now reads the ride's record (`fetchSyncRecord`) — synced is skipped, owed
+  carries on from its record, failed starts over. Tests +4 queue, +1 persistence.
+- Open: no heart rate on the Strava activity. Diagnose from the ride's GPX before changing the exporter.
+- Open: a POST whose response is lost (connection drops) leaves the record pending, and resending can make a
+  second activity. Needs a lookup by `external_id` before resending, or accept the window.
+- Lost-reply resend filed as #663. Activity deleted on Strava (record stays synced) noted on #632. No heart
+  rate was the simulator: it had none to send.
+
+Review (2026-11-27):
+- Device: upload, notes as description, HR/cadence (on a device ride), repeat tap skipped, offline → relaunch → synced.
+- Full CyclometerTests: 3271 passed, 1 failed (`finishStatsNeverStored`, #650's test: `store.finish()`'s 1 s ran
+  out under load) → `finish(timeout: 30 s)`, suite green. S12.1's DEBUG trigger moved from the toolbar (iOS 27
+  snapshots draw it) to a long-press on the athlete card. Queue tests advance the clock exactly instead of
+  `clock.run()` (0.5 s wall budget).

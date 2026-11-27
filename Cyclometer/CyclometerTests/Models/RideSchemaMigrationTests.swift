@@ -337,6 +337,24 @@ struct RideSchemaMigrationTests {
         }
     }
 
+    /// #630: `isSyncOwed` arrives with its declaration default, so no older ride is resumed by
+    /// the upload queue. None of them has a sync record to resume.
+    @Test("a ride from before #630 migrates as owing no sync, and the queue's fetch leaves it alone")
+    func legacyRideOwesNoSync() async throws {
+        try await withTemporaryStoreURL(prefix: "RideMigration") { url in
+            try writeLegacyStore(at: url, rideId: UUID(), startedAt: .now)
+            let container = try openStore(at: url)
+            let context = ModelContext(container)
+            let legacyRide = try #require(context.fetch(FetchDescriptor<Ride>()).first)
+            #expect(legacyRide.isSyncOwed == false)
+            legacyRide.endedAt = legacyRide.startedAt.addingTimeInterval(4_212)
+            try context.save()
+
+            let actor = RidePersistenceActor(modelContainer: container)
+            #expect(try await actor.ridesOwedSync().isEmpty)
+        }
+    }
+
     /// #460's opposite of #277: a ride from before it has no finish stats, so it migrates owed them,
     /// and is settled the first time the backfill stores them — its calorie series too (#536).
     @Test("a ride that ended before #460 migrates owed its finish stats and calorie series, once")

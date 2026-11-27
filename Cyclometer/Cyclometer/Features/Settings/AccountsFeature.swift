@@ -34,9 +34,7 @@ struct AccountsFeature {
 
         /// The connected account. Nil with no record, and also when Strava revoked access: both show
         /// the Connect button (UX §S12.1).
-        var account: ConnectedService? {
-            preferences.connectedServices.first { $0.serviceType == .strava && !$0.isDisconnected }
-        }
+        var account: ConnectedService? { preferences.stravaAccount }
 
         /// What the rider unticked on Strava's consent screen, for the Permissions section.
         var missingPermissions: [StravaPermission] {
@@ -52,6 +50,10 @@ struct AccountsFeature {
         case connectTapped
         case connectFinished(ConnectOutcome)
         case disconnectTapped
+        #if DEBUG
+        /// S12.1's debug "Upload Latest Ride" (#630). #631 replaces it.
+        case debugUploadTapped
+        #endif
         case alert(PresentationAction<Alert>)
         case delegate(Delegate)
 
@@ -71,6 +73,11 @@ struct AccountsFeature {
         enum Delegate: Equatable {
             /// The rider confirmed Disconnect. The parent pops this screen and disconnects.
             case disconnectConfirmed
+            #if DEBUG
+            /// Sends the newest ride to Strava through `SyncQueueFeature` (#630), so an upload can be
+            /// checked on device before S10's Sync To exists. #631 replaces it.
+            case debugUploadLatestRide
+            #endif
         }
     }
 
@@ -118,6 +125,11 @@ struct AccountsFeature {
 
             case .alert(.presented(.confirmDisconnect)):
                 return .send(.delegate(.disconnectConfirmed))
+
+            #if DEBUG
+            case .debugUploadTapped:
+                return .send(.delegate(.debugUploadLatestRide))
+            #endif
 
             case .alert, .delegate:
                 return .none
@@ -185,7 +197,7 @@ struct StravaPermission: Equatable, Identifiable, Sendable {
 
     /// In the order the Permissions section lists them.
     static let all: [StravaPermission] = [
-        StravaPermission(scope: "activity:write", explanation: "Uploads need “Upload your activities”."),
+        StravaPermission(scope: StravaConfig.uploadScope, explanation: "Uploads need “Upload your activities”."),
         StravaPermission(scope: "activity:read_all", explanation: "Segments on private rides need “View data about your private activities”."),
         StravaPermission(scope: "read_all", explanation: "Private routes and segments need “View data about your private routes, segments, and events”."),
     ]

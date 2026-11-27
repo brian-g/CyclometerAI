@@ -46,6 +46,8 @@ struct AppFeature {
         var rides: RidesFeature.State = RidesFeature.State()
         var routes: RoutesFeature.State = RoutesFeature.State()
         var settings: SettingsFeature.State = SettingsFeature.State()
+        /// Strava uploads, which outlive S10 (#630).
+        var syncQueue: SyncQueueFeature.State = SyncQueueFeature.State()
 
         // ── Store recovery (#206) ────────────────────────────────────────────────
         /// Which store failed to open at launch, as S14 and S19 show it.
@@ -103,6 +105,7 @@ struct AppFeature {
         case rides(RidesFeature.Action)
         case routes(RoutesFeature.Action)
         case settings(SettingsFeature.Action)
+        case syncQueue(SyncQueueFeature.Action)
         case activeRide(ActiveRideFeature.Action)
         /// Sent from `.task` when a kill mid-ride left a non-`.ended` Ride behind
         /// (#175).
@@ -137,6 +140,7 @@ struct AppFeature {
         Scope(state: \.rides,    action: \.rides)    { RidesFeature() }
         Scope(state: \.routes,   action: \.routes)   { RoutesFeature() }
         Scope(state: \.settings, action: \.settings) { SettingsFeature() }
+        Scope(state: \.syncQueue, action: \.syncQueue) { SyncQueueFeature() }
 
         Reduce { state, action in
             switch action {
@@ -485,9 +489,13 @@ struct AppFeature {
                 // changed in iOS Settings (#313). Whatever screen holds a pairing scan gets it back,
                 // and shows live sensor status again (#418) — a no-op unless returning from
                 // `.background`.
+                // Uploads a quit or an outage left waiting carry on (#630). Also how the queue
+                // resumes at launch: this runs for the launch's first `.active`, and not from `.task`,
+                // whose `finish()` would cancel a long upload with it.
                 let settings = Effect<Action>.merge(
                     .send(.settings(.appBecameActive)),
-                    setPairingScansSuspended(false)
+                    setPairingScansSuspended(false),
+                    state.preferences.canUploadToStrava ? .send(.syncQueue(.resume)) : .none
                 )
                 // ActivityKit refuses a request from the background, so a ride that started or
                 // resumed there gets its Live Activity now (#308). The ride decides whether it needs one.
@@ -612,7 +620,16 @@ struct AppFeature {
                 guard state.activeRide != nil else { return .none }
                 return .send(.activeRide(.liveActivity(.preferenceChanged)))
 
-            case .rides, .routes, .settings, .activeRide, .onboarding:
+            #if DEBUG
+            case .settings(.delegate(.debugUploadLatestRide)):
+                // #631 replaces this with S10's Sync To.
+                return .run { [persistenceClient] send in
+                    guard let latest = try await persistenceClient.fetchRides().first else { return }
+                    await send(.syncQueue(.enqueue(rideId: latest.id)))
+                }
+            #endif
+
+            case .rides, .routes, .settings, .syncQueue, .activeRide, .onboarding:
                 return .none
             }
         }
@@ -638,6 +655,13 @@ struct AppFeature {
         .onChange(of: \.isDashboardVisible) { _, isVisible in
             Reduce { _, _ in
                 .send(.screenVisibilityChanged(isVisible))
+            }
+        }
+        // A connect, or a Reconnect that granted the upload scope, sends what was waiting on it
+        // (#630). Uploads waiting on Strava stay pending until then (PRD §8.12).
+        .onChange(of: \.preferences.canUploadToStrava) { _, canUpload in
+            Reduce { _, _ in
+                canUpload ? .send(.syncQueue(.resume)) : .none
             }
         }
     }

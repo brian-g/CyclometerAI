@@ -120,6 +120,12 @@ final class Ride {
     // Per-service sync tracking. Written by SyncQueueFeature (TCA.md §4.15) as uploads run.
     @Attribute(.externalStorage)
     var syncRecordsData: Data?
+    // True while any record in `syncRecords` still has work to do (`SyncStatus.isOwed`), so the
+    // queue's launch resume can find those rides with a predicate: the records themselves are an
+    // external-storage blob a `#Predicate` can't see into (#630). Written only with the records,
+    // by `RidePersistenceActor.saveSyncRecord`. The declaration default is what migration gives
+    // older rides, none of which has a record.
+    var isSyncOwed: Bool = false
 
     var syncRecords: [RideSyncRecord] {
         get { column("syncRecordsData").read([RideSyncRecord].self, from: syncRecordsData) ?? [] }
@@ -284,12 +290,13 @@ enum WeatherCondition: String, Codable, Sendable {
 
 /// Per-service sync record stored on Ride. Written by SyncQueueFeature (TCA.md §4.15) as uploads run.
 /// Phase 2 — structure defined in MVP for architecture continuity.
-struct RideSyncRecord: Codable, Sendable {
+struct RideSyncRecord: Codable, Equatable, Sendable {
     var service: ExternalService
     var status: SyncStatus
     var syncedAt: Date?                        // nil until successfully synced
     var remoteActivityId: String?              // e.g. Strava activity ID; used for deep linking
     var errorMessage: String?                  // Last failure reason; nil when synced
+    var remoteUploadId: String?                // The service's upload id while `processing`, so a relaunch resumes polling it (#630)
 }
 
 enum SyncStatus: String, Codable, Sendable {
@@ -298,4 +305,20 @@ enum SyncStatus: String, Codable, Sendable {
     case processing // Uploaded; awaiting the service's activity id, so a ride quit mid-poll resumes polling (#628)
     case synced     // Successfully uploaded
     case failed     // Upload failed; see RideSyncRecord.errorMessage
+
+    /// Still has work to do: the queue resumes it at launch (#630). A failed record waits for
+    /// the rider's Retry (#632).
+    var isOwed: Bool {
+        switch self {
+        case .pending, .uploading, .processing: true
+        case .synced, .failed: false
+        }
+    }
+}
+
+/// A finished ride's sync record that still has work to do (#630): what `SyncQueueFeature`
+/// resumes at launch.
+struct OwedSync: Sendable, Equatable {
+    var rideId: UUID
+    var record: RideSyncRecord
 }

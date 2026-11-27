@@ -177,6 +177,50 @@ actor RidePersistenceActor {
         }
     }
 
+    /// Finished rides' sync records that still have work to do, oldest ride first, so the queue
+    /// sends rides in the order they were ridden (#630). Filters on `endedAt != nil` for the
+    /// enum-predicate reason given on `fetchResumableRide`.
+    func ridesOwedSync() throws -> [OwedSync] {
+        do {
+            let descriptor = FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.endedAt != nil && $0.isSyncOwed },
+                sortBy: [SortDescriptor(\.startedAt)]
+            )
+            return try modelContext.fetch(descriptor).flatMap { ride in
+                ride.syncRecords.filter(\.status.isOwed).map { OwedSync(rideId: ride.id, record: $0) }
+            }
+        } catch {
+            logger.error("ridesOwedSync failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
+    /// The ride's record for one service, nil when it has never been sent there (#630). Throws
+    /// `rideNotFound` for a deleted ride.
+    func syncRecord(id: UUID, service: ExternalService) throws -> RideSyncRecord? {
+        try fetchRide(id: id).syncRecord(for: service)
+    }
+
+    /// Replaces the ride's record for `record.service`, or adds it, and keeps `isSyncOwed` in step
+    /// in the same save (#630). A ride deleted while its upload ran is skipped: there is nothing
+    /// left to record against.
+    func saveSyncRecord(id: UUID, record: RideSyncRecord) throws {
+        guard let ride = try rideRow(id: id) else {
+            logger.notice("saveSyncRecord(\(id, privacy: .public)) skipped: the ride is gone")
+            return
+        }
+        try savingChanges("saveSyncRecord", id: id, context: modelContext) {
+            var records = ride.syncRecords
+            if let index = records.firstIndex(where: { $0.service == record.service }) {
+                records[index] = record
+            } else {
+                records.append(record)
+            }
+            ride.syncRecords = records
+            ride.isSyncOwed = records.contains { $0.status.isOwed }
+        }
+    }
+
     /// Deletes the Strava segment efforts cached on every ride, when Strava is disconnected (PRD
     /// §8.12). The rides' `RideSyncRecord`s stay, so S15 can still link to the activity.
     func clearStravaCaches() throws {
@@ -316,7 +360,7 @@ actor RidePersistenceActor {
     /// `<metadata>`/`<trk><name>`.
     func fetchRideExportMetadata(id: UUID) throws -> RideExportMetadata {
         let ride = try fetchRide(id: id)
-        return RideExportMetadata(title: ride.title, startedAt: ride.startedAt, routeName: ride.routeName)
+        return RideExportMetadata(title: ride.title, startedAt: ride.startedAt, routeName: ride.routeName, notes: ride.notes)
     }
 
     /// Read path for S15's Stats section (#251) and its metric sections (#536).
