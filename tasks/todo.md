@@ -3557,3 +3557,5 @@ Review (2026-11-27):
   as `Text`, fallback reason localized; `HealthWorkoutPresence.none` → `.absent`). Skipped, asked Brian: account
   switch reads old rides as deleted (needs athlete id on `RideSyncRecord`); Synced To label/capsule baseline alignment.
   Full CyclometerTests: 3354 passed, 1 failed (`finishStatsNeverStored`, known).
+- Brian on the skipped findings: account switch — don't fix; baseline alignment — don't fix, centred is fine. Both
+  recorded in UX §S15's as-built notes.
