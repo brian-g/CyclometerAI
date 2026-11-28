@@ -43,11 +43,14 @@ struct AccountsFeatureTests {
         record: ConnectedService?,
         connect: ConnectScript = .fails(.cancelled),
         strava: StravaClient = .mock(athlete: ada),
+        persistenceClient: PersistenceClient = .testValue,
         initialState: (inout AccountsFeature.State) -> Void = { _ in }
     ) -> TestStoreOf<AccountsFeature> {
         let storage = FileStorage.inMemory
+        let memory = InMemoryStorage()
         return withDependencies {
             $0.defaultFileStorage = storage
+            $0.defaultInMemoryStorage = memory
         } operation: {
             @Shared(.appPreferences) var preferences
             $preferences.withLock { $0.connectedServices = record.map { [$0] } ?? [] }
@@ -68,8 +71,10 @@ struct AccountsFeatureTests {
                 AccountsFeature()
             } withDependencies: {
                 $0.defaultFileStorage = storage
+                $0.defaultInMemoryStorage = memory
                 $0.stravaAuth = auth
                 $0.strava = strava
+                $0.persistenceClient = persistenceClient
             }
         }
     }
@@ -81,6 +86,7 @@ struct AccountsFeatureTests {
         let store = makeStore(record: Self.record())
 
         await store.send(.task)
+        await store.receive(\.uploadsFetched)
         await store.receive(\.athleteFetched) { $0.athlete = Self.ada }
     }
 
@@ -105,6 +111,7 @@ struct AccountsFeatureTests {
         let store = makeStore(record: Self.record(), strava: strava)
 
         await store.send(.task)
+        await store.receive(\.uploadsFetched)
         await store.receive(\.athleteFetched)
         #expect(store.state.athlete == nil)
     }
@@ -123,6 +130,7 @@ struct AccountsFeatureTests {
             $0.$preferences.withLock { $0.connectedServices = [Self.record()] }
         }
         await store.receive(\.delegate.connected)
+        await store.receive(\.uploadsFetched)
         await store.receive(\.athleteFetched) { $0.athlete = Self.ada }
         #expect(store.state.account == Self.record())
     }
@@ -165,6 +173,7 @@ struct AccountsFeatureTests {
             $0.$preferences.withLock { $0.connectedServices = [Self.record()] }
         }
         await store.receive(\.delegate.connected)
+        await store.receive(\.uploadsFetched)
         await store.receive(\.athleteFetched) { $0.athlete = Self.ada }
     }
 
@@ -182,6 +191,7 @@ struct AccountsFeatureTests {
             $0.$preferences.withLock { $0.connectedServices = [Self.record()] }
         }
         await store.receive(\.delegate.connected)
+        await store.receive(\.uploadsFetched)
         await store.receive(\.athleteFetched) { $0.athlete = Self.ada }
         #expect(store.state.missingPermissions.isEmpty)
     }
@@ -225,5 +235,58 @@ struct AccountsFeatureTests {
     func revokedAccountNamesNoPermissions() async {
         let store = makeStore(record: Self.record(scopes: ["read"], isDisconnected: true))
         #expect(store.state.missingPermissions.isEmpty)
+    }
+
+    // MARK: - Uploads (#632)
+
+    private static let rideId = UUID()
+    private static let processing = StravaWorkItem(
+        rideId: rideId, title: "River hill loop", record: RideSyncRecord(service: .strava, status: .processing, remoteUploadId: "1")
+    )
+    private static let failed = StravaWorkItem(
+        rideId: UUID(), title: "Gnarly", record: RideSyncRecord(service: .strava, status: .failed, errorMessage: "The file was empty.")
+    )
+
+    @Test("Appearing reads the rides on their way to Strava or failed, before the athlete")
+    func appearingReadsUploads() async {
+        let store = makeStore(record: Self.record(), persistenceClient: .mock(ridesWithStravaWork: [Self.processing, Self.failed]))
+
+        await store.send(.task)
+        await store.receive(\.uploadsFetched) { $0.fetchedUploads = [Self.processing, Self.failed] }
+        await store.receive(\.athleteFetched) { $0.athlete = Self.ada }
+        #expect(store.state.uploads == [Self.processing, Self.failed])
+    }
+
+    @Test("A row follows its record as the store writes it, and leaves once the ride is on Strava")
+    func uploadsFollowLiveRecords() async {
+        let store = makeStore(record: Self.record()) { $0.fetchedUploads = [Self.processing, Self.failed] }
+        // Written from outside the store, as the live persistence client writes it.
+        store.exhaustivity = .off
+        let memory = store.dependencies.defaultInMemoryStorage
+        func write(_ record: RideSyncRecord?, for rideId: UUID) {
+            withDependencies { $0.defaultInMemoryStorage = memory } operation: {
+                @Shared(.liveStravaSyncRecords) var live
+                $live.withLock { $0.set(record, for: rideId) }
+            }
+        }
+
+        let stillProcessing = RideSyncRecord(service: .strava, status: .processing, errorMessage: SyncReason.stillProcessing, remoteUploadId: "1")
+        write(stillProcessing, for: Self.rideId)
+        #expect(store.state.uploads.first?.record == stillProcessing)
+
+        write(RideSyncRecord(service: .strava, status: .synced, remoteActivityId: "9"), for: Self.rideId)
+        #expect(store.state.uploads == [Self.failed])
+
+        write(nil, for: Self.failed.rideId)
+        #expect(store.state.uploads.isEmpty)
+    }
+
+    @Test("Retry on a failed row sends it again; a row on its way has nothing to retry")
+    func retry() async {
+        let store = makeStore(record: Self.record()) { $0.fetchedUploads = [Self.processing, Self.failed] }
+
+        await store.send(.retryTapped(rideId: Self.failed.rideId))
+        await store.receive(\.delegate.uploadToStrava)
+        await store.send(.retryTapped(rideId: Self.processing.rideId))
     }
 }

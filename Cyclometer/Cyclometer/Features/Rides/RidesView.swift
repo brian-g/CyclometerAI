@@ -41,8 +41,18 @@ struct RidesView: View {
                             unitSystem: store.unitSystem, now: now)
                 }
                 .onAppear { store.send(.rowAppeared(ride.id)) }
-                // Trailing Delete only. §S14's leading Sync and Make Route wait on
-                // service sync (Phase 2) and a route-from-ride model, neither built (#248).
+                // Leading Sync (#632), for a failed upload or a ride never sent. §S14's Make
+                // Route waits on a route-from-ride model (#248).
+                .swipeActions(edge: .leading) {
+                    if store.state.offersSync(ride) {
+                        Button {
+                            store.send(.syncSwiped(ride.id))
+                        } label: {
+                            Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .tint(Color.cyInfo)
+                    }
+                }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
                         deleteRide(ride.id)

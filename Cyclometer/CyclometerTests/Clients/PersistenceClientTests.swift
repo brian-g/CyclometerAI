@@ -647,6 +647,116 @@ struct PersistenceClientTests {
         await #expect(throws: PersistenceError.rideNotFound) { try await client.fetchSyncRecord(UUID(), .strava) }
     }
 
+    // MARK: - Synced To, Sync swipe, Uploads (#632)
+
+    /// A finished ride started at `base` plus `hours`, for the sync read paths.
+    private static func finishedRide(_ client: PersistenceClient, hours: Double) async throws -> UUID {
+        let id = UUID()
+        let start = Date(timeIntervalSince1970: 1_000_000).addingTimeInterval(hours * 3_600)
+        try await client.createRide(id, start, nil)
+        try await client.finalizeRide(id, start.addingTimeInterval(1_800), RideSummaryUpdate(
+            rideId: id, recordingState: .ended,
+            durationSeconds: 60, distanceMeters: 100, averageSpeedMPS: 2, maxSpeedMPS: 3
+        ), nil, false)
+        return id
+    }
+
+    @Test("deleteSyncRecord removes the service's record only, and clears isSyncOwed with it")
+    func deleteSyncRecordKeepsOwedFlag() async throws {
+        let (client, swiftDataStack) = Self.makeLiveClient()
+        let rideId = try await Self.finishedRide(client, hours: 0)
+        let other = RideSyncRecord(service: .rideWithGPS, status: .synced)
+        try await client.saveSyncRecord(rideId, RideSyncRecord(service: .strava, status: .pending))
+        try await client.saveSyncRecord(rideId, other)
+        #expect(try Self.fetchRide(rideId, from: swiftDataStack).isSyncOwed)
+
+        try await client.deleteSyncRecord(rideId, .strava)
+
+        let ride = try Self.fetchRide(rideId, from: swiftDataStack)
+        #expect(ride.syncRecords == [other])
+        #expect(!ride.isSyncOwed)
+        // A ride that's gone is skipped, not thrown for.
+        try await client.deleteSyncRecord(UUID(), .strava)
+    }
+
+    @Test("fetchRidesWithStravaWork lists owed and failed Strava records, newest first, and nothing else")
+    func ridesWithStravaWork() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let failed = try await Self.finishedRide(client, hours: 0)
+        let processing = try await Self.finishedRide(client, hours: 2)
+        let synced = try await Self.finishedRide(client, hours: 1)
+        _ = try await Self.finishedRide(client, hours: 3)  // never sent: no record
+        let otherService = try await Self.finishedRide(client, hours: 4)
+        let unfinished = UUID()
+        try await client.createRide(unfinished, Date(timeIntervalSince1970: 1_000_000), nil)
+
+        let failedRecord = RideSyncRecord(service: .strava, status: .failed, errorMessage: "The file was empty.")
+        let processingRecord = RideSyncRecord(service: .strava, status: .processing, remoteUploadId: "7")
+        try await client.saveSyncRecord(failed, failedRecord)
+        try await client.saveSyncRecord(processing, processingRecord)
+        try await client.saveSyncRecord(synced, RideSyncRecord(service: .strava, status: .synced, remoteActivityId: "9"))
+        try await client.saveSyncRecord(otherService, RideSyncRecord(service: .rideWithGPS, status: .failed))
+        try await client.saveSyncRecord(unfinished, RideSyncRecord(service: .strava, status: .pending))
+
+        #expect(try await client.fetchRidesWithStravaWork() == [
+            StravaWorkItem(rideId: processing, title: "", record: processingRecord),
+            StravaWorkItem(rideId: failed, title: "", record: failedRecord),
+        ])
+    }
+
+    @Test("fetchRides carries each ride's Strava status for S14's Sync swipe; nil for one never sent")
+    func fetchRidesCarriesStravaStatus() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let sent = try await Self.finishedRide(client, hours: 1)
+        let neverSent = try await Self.finishedRide(client, hours: 0)
+        try await client.saveSyncRecord(sent, RideSyncRecord(service: .strava, status: .failed))
+
+        let statuses = Dictionary(uniqueKeysWithValues: try await client.fetchRides().map { ($0.id, $0.stravaSyncStatus) })
+        #expect(statuses[sent] == .failed)
+        #expect(statuses[neverSent] == .some(nil))
+    }
+
+    @Test("fetchRideStats carries the Strava record and whether a Health workout is owed, for S15's Synced To")
+    func fetchRideStatsCarriesSync() async throws {
+        let (client, _) = Self.makeLiveClient()
+        let rideId = try await Self.finishedRide(client, hours: 0)
+        #expect(try await client.fetchRideStats(rideId).stravaRecord == nil)
+        #expect(try await client.fetchRideStats(rideId).isHealthWorkoutOwed == false)
+
+        let synced = RideSyncRecord(service: .strava, status: .synced, remoteActivityId: "555")
+        try await client.saveSyncRecord(rideId, synced)
+        try await client.setHealthWorkoutOwed(rideId, true)
+
+        let stats = try await client.fetchRideStats(rideId)
+        #expect(stats.stravaRecord == synced)
+        #expect(stats.isHealthWorkoutOwed)
+    }
+
+    @Test("The live client publishes each Strava record it writes, and a delete as one gone")
+    func liveClientPublishesStravaRecords() async throws {
+        try await withDependencies {
+            $0.defaultInMemoryStorage = InMemoryStorage()
+        } operation: {
+            @SharedReader(.liveStravaSyncRecords) var live
+            let (client, _) = Self.makeLiveClient()
+            let rideId = try await Self.finishedRide(client, hours: 0)
+            let stale = RideSyncRecord(service: .strava, status: .synced, remoteActivityId: "1")
+            #expect(live.record(for: rideId, stored: stale) == stale)
+
+            let uploading = RideSyncRecord(service: .strava, status: .uploading)
+            try await client.saveSyncRecord(rideId, uploading)
+            #expect(live.record(for: rideId, stored: stale) == uploading)
+
+            // Another service's record isn't Strava's: it leaves the live one alone.
+            try await client.saveSyncRecord(rideId, RideSyncRecord(service: .rideWithGPS, status: .failed))
+            #expect(live.record(for: rideId, stored: stale) == uploading)
+
+            try await client.deleteSyncRecord(rideId, .strava)
+            #expect(live.record(for: rideId, stored: stale) == nil)
+            #expect(live.status(for: rideId, stored: .synced) == nil)
+        }
+    }
+
     @Test("fetchRide carries the ride's notes, the Strava upload's description")
     func fetchRideCarriesNotes() async throws {
         let (client, _) = Self.makeLiveClient()
@@ -708,10 +818,10 @@ struct PersistenceClientTests {
         // finish stats, both are owed them, as S10 reads (#650).
         #expect(try await client.fetchRideStats(withSensors) == RideStats(
             averageSpeedMPS: 4, maxSpeedMPS: 9, averageCadenceRPM: 0, maxCadenceRPM: 104, vehiclePassCount: 3,
-            isFinishStatsOwed: true, title: "", endedAt: endedAt
+            isFinishStatsOwed: true, title: "", endedAt: endedAt, isHealthWorkoutOwed: true
         ))
         #expect(try await client.fetchRideStats(withoutSensors) == RideStats(
-            averageSpeedMPS: 3, maxSpeedMPS: 5, isFinishStatsOwed: true, title: "", endedAt: endedAt
+            averageSpeedMPS: 3, maxSpeedMPS: 5, isFinishStatsOwed: true, title: "", endedAt: endedAt, isHealthWorkoutOwed: true
         ))
     }
 
@@ -939,7 +1049,8 @@ struct PersistenceClientTests {
 
         // Nil is a result, not "still to work out": the ride isn't owed a backfill.
         #expect(try await client.fetchRidesOwedFinishStats().isEmpty)
-        #expect(try await client.fetchRideStats(rideId) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, title: "", endedAt: endedAt))
+        #expect(try await client.fetchRideStats(rideId) == RideStats(averageSpeedMPS: 3, maxSpeedMPS: 5, title: "", endedAt: endedAt,
+                                                                     isHealthWorkoutOwed: true))
     }
 
     @Test("finalizeRide without finish stats leaves the ride owed them; a checkpoint never writes them")

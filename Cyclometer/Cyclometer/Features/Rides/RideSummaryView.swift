@@ -156,92 +156,9 @@ private struct SyncToCapsules: View {
 
     private var capsules: some View {
         ForEach(store.syncRows) { row in
-            SyncToCapsule(row: row) {
+            SyncToCapsule(destination: row.destination, isFilled: row.isChosen, needsReconnect: row.needsReconnect) {
                 store.send(.syncDestinationTapped(row.destination))
             }
-        }
-    }
-}
-
-/// One destination: its mark and name, filled when chosen. `primaryDark` for every destination,
-/// not each service's brand color (UX §S10, #637); unchosen, outlined so it reads against the
-/// page. A service waiting on Reconnect shows the connection symbol in place of its mark,
-/// unfilled, and reconnects when tapped.
-private struct SyncToCapsule: View {
-    let row: RideSummaryFeature.SyncRow
-    let action: () -> Void
-
-    /// The mark's height: Strava's is an image, which doesn't size itself to the text as a symbol does.
-    @ScaledMetric(relativeTo: .subheadline) private var markHeight = Spacing.lg
-
-    /// `strava-mark.svg`'s glyph fills 512 of its viewBox's 640 points of height, so its frame is
-    /// that much taller for the glyph itself to be `markHeight`. Here rather than a cropped asset:
-    /// S12's Accounts row draws the same file at its own size.
-    private static let stravaMarkFrameScale: CGFloat = 640 / 512
-
-    var body: some View {
-        let isFilled = row.isChosen && !row.needsReconnect
-        Button(action: action) {
-            Label {
-                Text(row.destination.name)
-            } icon: {
-                mark.frame(height: row.destination == .service(.strava) && !row.needsReconnect
-                           ? markHeight * Self.stravaMarkFrameScale : markHeight)
-            }
-            .labelStyle(SyncToLabelStyle())
-            .font(.subheadline.weight(.medium))
-            .padding(Spacing.sm)
-            .foregroundStyle(isFilled ? Color.cyTextOnPrimary : Color.cyTextSecondary)
-            .background(isFilled ? Color.cyPrimaryDark : Color.cyBgTertiary, in: Capsule())
-            .overlay {
-                if !isFilled {
-                    Capsule().strokeBorder(Color.cyBorder, lineWidth: Spacing.strokeThin)
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isFilled ? .isSelected : [])
-        .accessibilityHint(row.needsReconnect ? "Reconnects your account" : "")
-    }
-
-    @ViewBuilder private var mark: some View {
-        if row.needsReconnect {
-            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-        } else {
-            switch row.destination {
-            case .appleHealth:
-                Image(systemName: "figure.run")
-            case .service(.strava):
-                // Template-rendered, so it takes the capsule's color: no orange outside Strava's
-                // own assets (#629).
-                Image(.stravaMark).resizable().scaledToFit()
-            case .service:
-                Image(systemName: "arrow.up.circle")
-            }
-        }
-    }
-}
-
-/// The mark and name close together, as the frame spaces them.
-private struct SyncToLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: Spacing.xs) {
-            configuration.icon
-            configuration.title
-        }
-    }
-}
-
-private extension SyncDestination {
-    /// The capsule's name.
-    var name: LocalizedStringResource {
-        switch self {
-        case .appleHealth: "Apple Health"
-        case .service(.strava): "Strava"
-        case .service(.rideWithGPS): "Ride with GPS"
-        case .service(.tribosDotStudio): "tribos.studio"
-        case .service(.komoot): "Komoot"
         }
     }
 }

@@ -322,3 +322,12 @@ struct OwedSync: Sendable, Equatable {
     var rideId: UUID
     var record: RideSyncRecord
 }
+
+/// A finished ride whose Strava upload is still under way or failed (#632): one row of S12.1's
+/// Uploads section.
+struct StravaWorkItem: Sendable, Equatable, Identifiable {
+    var rideId: UUID
+    var title: String
+    var record: RideSyncRecord
+    var id: UUID { rideId }
+}

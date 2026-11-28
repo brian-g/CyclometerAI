@@ -47,7 +47,7 @@ final class StravaAccountSnapshotTests: XCTestCase {
 
     /// Each store gets its own in-memory file system, seeded in the same scope. The Strava mock
     /// answers the athlete already seeded, so a `.task` that lands mid-render changes nothing.
-    private func screen(record: ConnectedService?, athlete: StravaAthlete? = nil) -> some View {
+    private func screen(record: ConnectedService?, athlete: StravaAthlete? = nil, uploads: [StravaWorkItem] = []) -> some View {
         let storage = FileStorage.inMemory
         let store = withDependencies {
             $0.defaultFileStorage = storage
@@ -56,12 +56,15 @@ final class StravaAccountSnapshotTests: XCTestCase {
             $preferences.withLock { $0.connectedServices = record.map { [$0] } ?? [] }
             var state = AccountsFeature.State()
             state.athlete = athlete
+            state.fetchedUploads = uploads
             return Store(initialState: state) {
                 AccountsFeature()
             } withDependencies: {
                 $0.defaultFileStorage = storage
                 $0.strava = .mock(athlete: athlete ?? StravaAthlete(name: nil, photoURL: nil))
                 $0.stravaAuth = .testValue
+                // Answers the uploads already seeded, for the athlete's reason.
+                $0.persistenceClient = .mock(ridesWithStravaWork: uploads)
             }
         }
         return NavigationStack {
@@ -109,6 +112,19 @@ final class StravaAccountSnapshotTests: XCTestCase {
     /// granted, so no Permissions section.
     func testStravaAccountConnected() {
         assertBothSchemes(screen(record: Self.record(), athlete: Self.ada), named: "connected")
+    }
+
+    /// The Uploads section (#632): one ride processing, one waiting offline, one failed with Retry.
+    func testStravaAccountUploads() {
+        let uploads = [
+            StravaWorkItem(rideId: UUID(), title: "River hill loop",
+                           record: RideSyncRecord(service: .strava, status: .processing, remoteUploadId: "1")),
+            StravaWorkItem(rideId: UUID(), title: "Gnarly",
+                           record: RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.offline)),
+            StravaWorkItem(rideId: UUID(), title: "Gravel loop",
+                           record: RideSyncRecord(service: .strava, status: .failed, errorMessage: "The file was empty.")),
+        ]
+        assertBothSchemes(screen(record: Self.record(), athlete: Self.ada, uploads: uploads), named: "uploads")
     }
 
     /// Before the athlete arrives, or offline: "Strava" in place of the name.

@@ -69,7 +69,22 @@ struct RidesFeature {
         /// and led by a notice when only tracks did.
         @SharedReader(.persistentStoreStatus) var storeStatus
 
+        /// Strava records written since launch (#632), laid over the statuses the list read, so
+        /// a row's Sync swipe follows an upload.
+        @SharedReader(.liveStravaSyncRecords) var liveSyncRecords
+
         var unitSystem: UnitSystem { preferences.preferredUnit }
+
+        /// Whether a row offers the Sync swipe (#632, UX §S14): a failed upload, or a ride never
+        /// sent while Strava is connected, as S15's Synced To row offers it. Not one on its way or
+        /// on Strava: a second upload would be a second activity.
+        func offersSync(_ ride: RideListSummary) -> Bool {
+            switch liveSyncRecords.status(for: ride.id, stored: ride.stravaSyncStatus) {
+            case .failed: true
+            case nil: preferences.stravaAccount != nil
+            case .pending, .uploading, .processing, .synced: false
+            }
+        }
     }
 
     enum Thumbnail: Equatable {
@@ -103,6 +118,8 @@ struct RidesFeature {
         case deleteFailed
         case resetStoreButtonTapped
         case path(StackActionOf<RideRoutePath>)
+        /// The row's Sync swipe (#632).
+        case syncSwiped(UUID)
         case delegate(Delegate)
 
         @CasePathable
@@ -110,6 +127,11 @@ struct RidesFeature {
             /// "Use Route" from an S20 opened on this tab's stack (#426), on its way to
             /// `AppFeature` — `RoutesFeature`'s delegate of the same name.
             case useRoute(RouteReference)
+            /// Send the ride to Strava (#632), from a row's Sync swipe or S15's Synced To row:
+            /// `AppFeature` queues it.
+            case uploadToStrava(rideId: UUID)
+            /// Write the ride's workout to Apple Health, from S15's Synced To row (#632).
+            case addToAppleHealth(rideId: UUID)
             /// The rider asked to reset a store that failed to open (#206). `AppFeature`
             /// confirms and runs it, since it knows whether a ride is writing to it.
             case resetHistoryRequested
@@ -270,6 +292,16 @@ struct RidesFeature {
             // reads the new title back when it next appears (#538).
             case .path(.element(id: _, action: .ride(.delegate(.rideEdited)))):
                 return .send(.reloadRides)
+
+            case .syncSwiped(let id):
+                guard let ride = state.rides.first(where: { $0.id == id }), state.offersSync(ride) else { return .none }
+                return .send(.delegate(.uploadToStrava(rideId: id)))
+
+            case .path(.element(id: _, action: .ride(.delegate(.uploadToStrava(let id))))):
+                return .send(.delegate(.uploadToStrava(rideId: id)))
+
+            case .path(.element(id: _, action: .ride(.delegate(.addToAppleHealth(let id))))):
+                return .send(.delegate(.addToAppleHealth(rideId: id)))
 
             case .path, .delegate:
                 return .none

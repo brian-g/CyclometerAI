@@ -3,6 +3,10 @@ import Foundation
 
 /// S12.1 Strava Account (UX.md §S12.1, TCA.md §4.15, #629), pushed from S12's Accounts row.
 ///
+/// Its Uploads section (#632) is the one place an upload's progress shows: each ride on its way to
+/// Strava, and each that failed, with Retry. Read as the screen appears, and followed from there
+/// by the records the store writes (`liveStravaSyncRecords`).
+///
 /// Connect and Reconnect are one flow: `StravaAuthClient.connect` replaces any earlier record,
 /// which is how Reconnect clears `isDisconnected` or adds a scope the rider unticked. The record
 /// arrives through `@Shared(.appPreferences)`, which the client writes. The athlete's name and
@@ -15,8 +19,9 @@ import Foundation
 struct AccountsFeature {
     @Dependency(\.stravaAuth) var stravaAuth
     @Dependency(\.strava) var strava
+    @Dependency(\.persistenceClient) var persistenceClient
 
-    private enum CancelID { case athlete }
+    private enum CancelID { case athlete, uploads }
 
     @ObservableState
     struct State: Equatable {
@@ -27,6 +32,22 @@ struct AccountsFeature {
         /// While sign-in is showing, so a second tap doesn't start another.
         var isConnecting = false
         @Presents var alert: AlertState<Action.Alert>?
+        /// The rides on their way to Strava or failed, as read when the screen appeared (#632).
+        var fetchedUploads: [StravaWorkItem] = []
+        /// Strava records written since, laid over `fetchedUploads`.
+        @SharedReader(.liveStravaSyncRecords) var liveSyncRecords
+
+        /// The Uploads section's rows (#632): each fetched ride with its record as last written. A
+        /// ride that has since reached Strava, or whose record was reset, drops out.
+        var uploads: [StravaWorkItem] {
+            fetchedUploads.compactMap { item in
+                guard let record = liveSyncRecords.record(for: item.rideId, stored: item.record),
+                      record.status != .synced else { return nil }
+                var item = item
+                item.record = record
+                return item
+            }
+        }
 
         /// The connected account. Nil with no record, and also when Strava revoked access: both show
         /// the Connect button (UX §S12.1).
@@ -42,6 +63,9 @@ struct AccountsFeature {
         case task
         /// Nil when the fetch failed: the card keeps its placeholder.
         case athleteFetched(StravaAthlete?)
+        case uploadsFetched([StravaWorkItem])
+        /// Retry on a failed upload's row (#632).
+        case retryTapped(rideId: UUID)
         /// Connect, and Reconnect in the Permissions section.
         case connectTapped
         case connectFinished(StravaConnectOutcome)
@@ -62,6 +86,8 @@ struct AccountsFeature {
             /// here because `StravaSession` writes the record outside any reducer, where the
             /// parent's `.onChange` would never see it change.
             case connected
+            /// Send the ride to Strava again (#632): `AppFeature` queues it.
+            case uploadToStrava(rideId: UUID)
         }
     }
 
@@ -70,11 +96,19 @@ struct AccountsFeature {
             switch action {
             case .task:
                 guard state.account != nil else { return .none }
-                return fetchAthlete()
+                return refresh()
 
             case .athleteFetched(let athlete):
                 state.athlete = athlete
                 return .none
+
+            case .uploadsFetched(let uploads):
+                state.fetchedUploads = uploads
+                return .none
+
+            case .retryTapped(let rideId):
+                guard state.uploads.contains(where: { $0.rideId == rideId && $0.record.status == .failed }) else { return .none }
+                return .send(.delegate(.uploadToStrava(rideId: rideId)))
 
             case .connectTapped:
                 guard !state.isConnecting else { return .none }
@@ -87,7 +121,7 @@ struct AccountsFeature {
                 state.isConnecting = false
                 switch outcome {
                 case .connected:
-                    return .merge(.send(.delegate(.connected)), fetchAthlete())
+                    return .merge(.send(.delegate(.connected)), refresh())
                 case .cancelled:
                     return .none
                 case .failed:
@@ -109,6 +143,13 @@ struct AccountsFeature {
         .ifLet(\.$alert, action: \.alert)
     }
 
+    /// What the connected screen reads as it appears: the uploads from the store, then the name and
+    /// photo from Strava. One after the other, local first, so the section doesn't wait on the
+    /// network and the two land in a fixed order.
+    private func refresh() -> Effect<Action> {
+        .concatenate(fetchUploads(), fetchAthlete())
+    }
+
     /// The name and photo. A later fetch replaces one still in flight, so Reconnect's answer
     /// can't be overwritten by the appearance's.
     private func fetchAthlete() -> Effect<Action> {
@@ -116,6 +157,16 @@ struct AccountsFeature {
             await send(.athleteFetched(try? await strava.athlete()))
         }
         .cancellable(id: CancelID.athlete, cancelInFlight: true)
+    }
+
+    /// The Uploads section's rides. A failed read leaves the section as it was: it's logged in
+    /// `RidePersistenceActor`.
+    private func fetchUploads() -> Effect<Action> {
+        .run { [persistenceClient] send in
+            guard let uploads = try? await persistenceClient.fetchRidesWithStravaWork() else { return }
+            await send(.uploadsFetched(uploads))
+        }
+        .cancellable(id: CancelID.uploads, cancelInFlight: true)
     }
 }
 
@@ -148,7 +199,7 @@ struct StravaPermission: Equatable, Identifiable, Sendable {
     /// In the order the Permissions section lists them.
     static let all: [StravaPermission] = [
         StravaPermission(scope: StravaConfig.uploadScope, explanation: "Uploads need “Upload your activities”."),
-        StravaPermission(scope: "activity:read_all", explanation: "Segments on private rides need “View data about your private activities”."),
+        StravaPermission(scope: StravaConfig.privateActivitiesScope, explanation: "Segments on private rides need “View data about your private activities”."),
         StravaPermission(scope: "read_all", explanation: "Private routes and segments need “View data about your private routes, segments, and events”."),
     ]
 

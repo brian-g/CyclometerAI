@@ -16,7 +16,11 @@ enum StravaConfig {
 
     /// Requested at connect. Strava's consent screen lets the rider untick any of them, so what
     /// was granted is read from the callback, never assumed from this list.
-    static let requestedScopes = ["read", "read_all", "profile:read_all", "activity:read_all", uploadScope]
+    static let requestedScopes = ["read", "read_all", "profile:read_all", privateActivitiesScope, uploadScope]
+
+    /// The scope reading a private activity needs. Without it Strava answers 404 for one, so S15
+    /// can't tell a private activity from a deleted one (#632).
+    static let privateActivitiesScope = "activity:read_all"
 
     /// The scope `POST /uploads` needs. Without it the queue holds uploads (#630) and S12.1 names it.
     static let uploadScope = "activity:write"
