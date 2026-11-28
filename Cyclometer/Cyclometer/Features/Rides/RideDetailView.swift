@@ -94,6 +94,10 @@ struct RideDetailList<MapHeader: View>: View {
                 .foregroundStyle(Color.cyTextPrimary)
                 .disabled(store.vehiclePasses.isEmpty)
             }
+            // Under the Summary card, as Design.sketch draws it (#632).
+            if let syncedTo = store.syncedTo {
+                SyncedToSection(syncedTo: syncedTo) { store.send(.syncedToTapped($0)) } retry: { store.send(.syncRetryTapped) }
+            }
             RideDetailMetricSections(store: store)
             // Gone for a free ride. A deleted route keeps its name, without a link (#426).
             if let route = store.route {

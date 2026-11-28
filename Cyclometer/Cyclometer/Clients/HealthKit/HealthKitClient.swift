@@ -85,6 +85,20 @@ struct HealthKitClient {
     /// can skip its reads when a write is sure to fail (#277). Share status, unlike read
     /// status, is one HealthKit reports.
     var isWorkoutSharingAllowed: @Sendable () -> Bool
+    /// Whether the ride is in Health (#632), for S15's Apple Health capsule: our workout, found by
+    /// its sync identifier, or another source's cycling workout over the same time, which
+    /// `saveWorkout` skipped ours for. `.none` when neither is there, and when the read fails or
+    /// isn't allowed: the capsule is only drawn unfilled.
+    var workoutPresence: @Sendable (_ rideId: UUID, _ start: Date, _ end: Date) async -> HealthWorkoutPresence
+}
+
+/// Where a ride stands in Health (#632).
+enum HealthWorkoutPresence: Equatable, Sendable {
+    /// The workout this app wrote for the ride.
+    case ours
+    /// Another source recorded a cycling workout over the ride, such as an Apple Watch.
+    case otherSource
+    case none
 }
 
 extension HealthKitClient: DependencyKey {
@@ -105,7 +119,8 @@ extension HealthKitClient: DependencyKey {
             heartRateStream:       { makeHeartRateStream(store) },
             saveWorkout:           { try await saveWorkout($0, store) },
             deleteWorkout:         { try await deleteWorkout($0, store) },
-            isWorkoutSharingAllowed: { store.authorizationStatus(for: PermissionsClient.workoutType) == .sharingAuthorized }
+            isWorkoutSharingAllowed: { store.authorizationStatus(for: PermissionsClient.workoutType) == .sharingAuthorized },
+            workoutPresence:       { await workoutPresence(rideId: $0, start: $1, end: $2, store) }
         )
     }()
 
@@ -124,7 +139,8 @@ extension HealthKitClient: DependencyKey {
         saveWorkout:           { _ in },
         deleteWorkout:         { _ in },
         // Matches `saveWorkout`'s no-op succeeding.
-        isWorkoutSharingAllowed: { true }
+        isWorkoutSharingAllowed: { true },
+        workoutPresence:       { _, _, _ in .none }
     )
 }
 
@@ -316,7 +332,7 @@ extension HealthKitClient {
         do {
             try checkSpan(from: workout.startedAt, to: workout.endedAt)
 
-            if let existing = await overlappingCyclingWorkout(workout, store) {
+            if let existing = await overlappingCyclingWorkout(workout.rideId, workout.startedAt, workout.endedAt, store) {
                 logger.notice(
                     "workout for ride \(workout.rideId, privacy: .public) skipped — \(existing.sourceRevision.source.name, privacy: .public) already recorded one over the same time"
                 )
@@ -513,22 +529,22 @@ extension HealthKitClient {
 
     /// Best effort, like a denied read: a query that fails (a locked device's store, say)
     /// counts as "none found" rather than costing the workout.
-    private static func overlappingCyclingWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async -> HKWorkout? {
+    private static func overlappingCyclingWorkout(_ rideId: UUID, _ start: Date, _ end: Date, _ store: HKHealthStore) async -> HKWorkout? {
         do {
-            return try await queryOverlappingCyclingWorkout(workout, store)
+            return try await queryOverlappingCyclingWorkout(start, end, store)
         } catch {
             logger.notice(
-                "overlap check failed for ride \(workout.rideId, privacy: .public), writing anyway: \(error.localizedDescription, privacy: .public)"
+                "overlap check failed for ride \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
             return nil
         }
     }
 
-    private static func queryOverlappingCyclingWorkout(_ workout: RideWorkout, _ store: HKHealthStore) async throws -> HKWorkout? {
+    private static func queryOverlappingCyclingWorkout(_ start: Date, _ end: Date, _ store: HKHealthStore) async throws -> HKWorkout? {
         let fromOtherSources = NSCompoundPredicate(andPredicateWithSubpredicates: [
             HKQuery.predicateForWorkouts(with: .cycling),
             // No options: any workout that overlaps the ride at all, not only one inside it.
-            HKQuery.predicateForSamples(withStart: workout.startedAt, end: workout.endedAt),
+            HKQuery.predicateForSamples(withStart: start, end: end),
             NSCompoundPredicate(notPredicateWithSubpredicate: HKQuery.predicateForObjects(from: .default())),
         ])
         let descriptor = HKSampleQueryDescriptor(
@@ -537,6 +553,26 @@ extension HealthKitClient {
             limit: 1
         )
         return try await descriptor.result(for: store).first
+    }
+}
+
+extension HealthKitClient {
+    /// `workoutPresence`'s live read: our workout by its sync identifier (the ride's id, as
+    /// `syncMetadata` stamps it), else another source's overlapping cycling workout.
+    fileprivate static func workoutPresence(rideId: UUID, start: Date, end: Date, _ store: HKHealthStore) async -> HealthWorkoutPresence {
+        let ours = HKSampleQueryDescriptor(
+            predicates: [.workout(HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeySyncIdentifier,
+                                                              allowedValues: [rideId.uuidString]))],
+            sortDescriptors: [],
+            limit: 1
+        )
+        do {
+            if try await !ours.result(for: store).isEmpty { return .ours }
+        } catch {
+            logger.notice("workout lookup failed for ride \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return .none
+        }
+        return await overlappingCyclingWorkout(rideId, start, end, store) == nil ? .none : .otherSource
     }
 }
 

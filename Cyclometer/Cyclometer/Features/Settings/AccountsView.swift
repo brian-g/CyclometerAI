@@ -48,6 +48,16 @@ private struct ConnectedContent: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
 
+            // Only while something is on its way or failed (#632).
+            let uploads = store.uploads
+            if !uploads.isEmpty {
+                Section("Uploads") {
+                    ForEach(uploads) { upload in
+                        UploadRow(upload: upload) { store.send(.retryTapped(rideId: upload.rideId)) }
+                    }
+                }
+            }
+
             Section {
                 Button("Disconnect", role: .destructive) { store.send(.disconnectTapped) }
                     .buttonStyle(.borderedProminent)
@@ -75,6 +85,48 @@ private struct ConnectedContent: View {
                     .accessibilityLabel("Powered by Strava")
             }
             .listRowBackground(Color.clear)
+        }
+    }
+}
+
+/// One ride on its way to Strava, or failed (#632): its name, and where it stands.
+private struct UploadRow: View {
+    let upload: StravaWorkItem
+    let retry: () -> Void
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                // A ride S10 never named has a "" title: `RideRow`'s fallback.
+                Text(upload.title.isEmpty ? "Ride" : upload.title)
+                    .foregroundStyle(Color.cyTextPrimary)
+                Text(state)
+                    .font(.footnote)
+                    .foregroundStyle(upload.record.status == .failed ? Color.cyRatingBad : Color.cyTextSecondary)
+            }
+            Spacer(minLength: 0)
+            switch upload.record.status {
+            case .failed:
+                Button("Retry", action: retry)
+                    .buttonStyle(.borderless)
+                    .fontWeight(.semibold)
+            case .uploading, .processing:
+                ProgressView()
+            case .pending, .synced:
+                EmptyView()
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// What's happening, or why it's waiting: the queue's reason when it has one ("Offline"),
+    /// Strava's own when it failed.
+    private var state: String {
+        switch upload.record.status {
+        case .pending, .uploading: upload.record.errorMessage ?? String(localized: "Uploading…")
+        case .processing: upload.record.errorMessage ?? String(localized: "Processing on Strava")
+        case .failed: upload.record.errorMessage ?? String(localized: "Couldn't upload to Strava")
+        case .synced: ""
         }
     }
 }
@@ -164,17 +216,28 @@ private struct ConnectWithStravaButton: View {
 
 private func previewStore(
     account: ConnectedService?,
-    athlete: StravaAthlete? = nil
+    athlete: StravaAthlete? = nil,
+    uploads: [StravaWorkItem] = []
 ) -> StoreOf<AccountsFeature> {
     var state = AccountsFeature.State()
     state.$preferences.withLock { $0.connectedServices = account.map { [$0] } ?? [] }
     state.athlete = athlete
+    state.fetchedUploads = uploads
     return Store(initialState: state) {
         AccountsFeature()
     } withDependencies: {
         $0.strava = .mock(athlete: athlete ?? StravaAthlete(name: nil, photoURL: nil))
+        $0.persistenceClient = .mock(ridesWithStravaWork: uploads)
     }
 }
+
+/// One ride of each kind S12.1's Uploads section shows (#632).
+private let previewUploads = [
+    StravaWorkItem(rideId: UUID(), title: "River hill loop", record: RideSyncRecord(service: .strava, status: .processing, remoteUploadId: "1")),
+    StravaWorkItem(rideId: UUID(), title: "Gnarly", record: RideSyncRecord(service: .strava, status: .pending, errorMessage: SyncReason.offline)),
+    StravaWorkItem(rideId: UUID(), title: "Commute", record: RideSyncRecord(service: .strava, status: .uploading)),
+    StravaWorkItem(rideId: UUID(), title: "Gravel loop", record: RideSyncRecord(service: .strava, status: .failed, errorMessage: "The file was empty.")),
+]
 
 private func previewAccount(scopes: Set<String> = Set(StravaConfig.requestedScopes), isDisconnected: Bool = false) -> ConnectedService {
     ConnectedService(
@@ -198,6 +261,13 @@ private func previewAccount(scopes: Set<String> = Set(StravaConfig.requestedScop
 #Preview("Connected") {
     NavigationStack {
         AccountsView(store: previewStore(account: previewAccount(), athlete: StravaAthlete(name: "Ada Lovelace", photoURL: nil)))
+    }
+}
+
+#Preview("Connected, uploads") {
+    NavigationStack {
+        AccountsView(store: previewStore(account: previewAccount(), athlete: StravaAthlete(name: "Ada Lovelace", photoURL: nil),
+                                         uploads: previewUploads))
     }
 }
 

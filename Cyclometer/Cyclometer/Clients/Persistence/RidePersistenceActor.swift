@@ -229,6 +229,41 @@ actor RidePersistenceActor {
         }
     }
 
+    /// Removes the ride's record for one service, and keeps `isSyncOwed` in step (#632): the
+    /// activity was deleted on Strava, so the ride is as if never sent. A ride that's gone is
+    /// skipped.
+    func deleteSyncRecord(id: UUID, service: ExternalService) throws {
+        guard let ride = try rideRow(id: id) else {
+            logger.notice("deleteSyncRecord(\(id, privacy: .public)) skipped: the ride is gone")
+            return
+        }
+        try savingChanges("deleteSyncRecord", id: id, context: modelContext) {
+            let records = ride.syncRecords.filter { $0.service != service }
+            ride.syncRecords = records
+            ride.isSyncOwed = records.contains { $0.status.isOwed }
+        }
+    }
+
+    /// Finished rides whose Strava record is still under way or failed, newest ride first: S12.1's
+    /// Uploads section (#632). The records are a blob a `#Predicate` can't see into, so this narrows
+    /// to rides with any record and reads each one's; they're a few hundred bytes, held in the row.
+    func ridesWithStravaWork() throws -> [StravaWorkItem] {
+        do {
+            let descriptor = FetchDescriptor<Ride>(
+                predicate: #Predicate { $0.endedAt != nil && $0.syncRecordsData != nil },
+                sortBy: [SortDescriptor(\.startedAt, order: .reverse)]
+            )
+            return try modelContext.fetch(descriptor).compactMap { ride in
+                guard let record = ride.syncRecord(for: .strava),
+                      record.status.isOwed || record.status == .failed else { return nil }
+                return StravaWorkItem(rideId: ride.id, title: ride.title, record: record)
+            }
+        } catch {
+            logger.error("ridesWithStravaWork failed: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
+    }
+
     /// Deletes the Strava segment efforts cached on every ride, when Strava is disconnected (PRD
     /// §8.12). The rides' `RideSyncRecord`s stay, so S15 can still link to the activity.
     func clearStravaCaches() throws {
@@ -399,7 +434,9 @@ actor RidePersistenceActor {
             // allows for, and S15 must not offer to share a file that is gone.
             gpxFileURL: exportURL(for: ride).flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil },
             pauses: ride.pauses,
-            weather: ride.weather
+            weather: ride.weather,
+            stravaRecord: ride.syncRecord(for: .strava),
+            isHealthWorkoutOwed: ride.isHealthWorkoutOwed
         )
     }
 
@@ -496,7 +533,8 @@ actor RidePersistenceActor {
                     title: $0.title,
                     startedAt: $0.startedAt,
                     distanceMeters: $0.distanceMeters,
-                    durationSeconds: $0.durationSeconds
+                    durationSeconds: $0.durationSeconds,
+                    stravaSyncStatus: $0.syncRecord(for: .strava)?.status
                 )
             }
         } catch {

@@ -58,6 +58,14 @@ struct StravaAPI: Sendable {
                     body: try JSONEncoder().encode(["gear_id": gearID]),
                     contentType: "application/json"
                 ))
+            },
+            activityExists: { activityID in
+                do {
+                    _ = try await fetch(Request(name: "activityExists", path: "activities/\(activityID)"))
+                    return true
+                } catch StravaError.http(status: 404) {
+                    return false
+                }
             }
         )
     }

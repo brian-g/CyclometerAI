@@ -8,6 +8,8 @@ extension StravaClient {
     /// - Parameter uploadStatuses: Answered in order by successive `uploadStatus` calls, the last
     ///   one repeating, so a test can walk an upload through `.processing` to `.ready`.
     /// - Parameter routes: The first page; later pages are empty.
+    /// - Parameter deletedActivities: Activity ids `activityExists` answers false for; any other
+    ///   id exists.
     static func mock(
         uploadID: StravaUploadID = StravaUploadID(rawValue: "1"),
         uploadStatuses: [StravaUploadStatus] = [.ready(activityID: "1")],
@@ -17,6 +19,7 @@ extension StravaClient {
         gpx: [String: Data] = [:],
         athlete: StravaAthlete = StravaAthlete(name: "Ada Lovelace", photoURL: nil),
         bikes: [StravaGear] = [],
+        deletedActivities: Set<String> = [],
         onUpload: @escaping @Sendable (StravaUpload) -> Void = { _ in },
         onSetGear: @escaping @Sendable (_ activityID: String, _ gearID: String) -> Void = { _, _ in }
     ) -> StravaClient {
@@ -49,7 +52,8 @@ extension StravaClient {
             },
             athlete: { athlete },
             bikes: { bikes },
-            setGear: { activityID, gearID in onSetGear(activityID, gearID) }
+            setGear: { activityID, gearID in onSetGear(activityID, gearID) },
+            activityExists: { !deletedActivities.contains($0) }
         )
     }
 }

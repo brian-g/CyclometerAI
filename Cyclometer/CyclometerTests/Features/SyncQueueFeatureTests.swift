@@ -475,7 +475,7 @@ struct SyncQueueFeatureTests {
         await store.skipInFlightEffects()
 
         #expect(log.uploads.value.count == 1)
-        #expect(log.records.value == [Self.uploading, Self.processing(), Self.processing(reason: SyncReason.rideUnreadable)])
+        #expect(log.records.value == [Self.uploading, Self.processing(), Self.processing(reason: SyncReason.unrecognised)])
     }
 
     @Test("A ride already in flight isn't run twice, by enqueue or resume")

@@ -3512,3 +3512,43 @@ Review (2026-11-27):
   mock pins the Health choice; comment). Brian on the rest: services default **off** (Health on) — PRD §8.12;
   missing upload scope → validate at Strava sign-in, #669; failed Reconnect keeps an alert already up;
   a save landing >60 s after S10 closed isn't uploaded — accepted, no fix.
+
+---
+
+## #632 — S15 Synced To, S14 Sync swipe, S12.1 Uploads (2026-11-27)
+
+Plan: Synced To capsules (UX §S15, #637), not the issue's Sync section. Decisions (Brian): S15 shows no
+progress (in flight = filled); progress on S12.1's new Uploads section; failure = status line + Retry under the
+capsules, no dialog; grey capsule tap sends at once; Apple Health capsule in scope, filled for another source's
+overlapping workout. S10 swipe-down not sending → separate issue.
+
+- [x] Persistence: `Ride.stravaSyncStatus` mirror + backfill, `deleteSyncRecord`, `fetchRidesWithStravaWork`, `RideListSummary.stravaSyncStatus`
+- [x] SyncQueueFeature: `.liveStravaSyncRecords` shared, `.recordSaved`, pending on enqueue; `rideUnreadable` copy + log
+- [x] StravaClient `activityExists`; HealthKitClient `workoutPresence`
+- [x] Extract `SyncToCapsule` to UI/Components (S10 unchanged)
+- [x] S15 Synced To row: state, taps, 404 reset, status line, previews
+- [x] S14 Sync swipe
+- [x] S12.1 Uploads section
+- [x] AppFeature wiring: `.uploadToStrava`, `.addToAppleHealth`
+- [x] Tests: snapshots (S15 Synced To ×7, S12.1 Uploads; S10 unchanged), TestStore (retry once ×3, 404, Health, live map, persistence) — (S15, S12.1, S10 unchanged), TestStore (retry once ×3, 404, Health, live map, persistence)
+- [x] Docs: UX §S15/§S14/§S12.1, TCA §4.15, PRD §8.12
+- [x] File S10 swipe-down issue
+
+Notes (2026-11-27):
+- No `Ride.stravaSyncStatus` mirror after all: the records blob is a few hundred bytes, kept inline in the row, so
+  `fetchRides` reads `syncRecord(for: .strava)?.status` and S12.1's query narrows on `syncRecordsData != nil`.
+- Live updates published by the live `PersistenceClient.saveSyncRecord` / `deleteSyncRecord` (`LiveSyncRecords`,
+  `.liveStravaSyncRecords`, delete kept as a removal), not by the queue: one seam for every writer, queue tests untouched.
+- S12.1 reads uploads then athlete, concatenated, so the two land in a fixed order for exhaustive tests.
+- `SyncReason.rideUnreadable` → `unrecognised` ("Couldn't upload; trying again"); `recordWaiting` logs the error.
+- S10 swipe-down not sending → #670.
+
+Review (2026-11-27):
+- Device (Brian): looks good.
+- Snapshots: the AXXXL status line wrapped a word a line beside Retry → Retry drops under the reason
+  (`ViewThatFits`), icon and text as a plain HStack (a list `Label` spaces its icon as a row's). Unfilled capsules
+  show a short bar at each end in layer-rendered snapshots, S10's included: a renderer artifact, clean with
+  `drawHierarchyInKeyWindow` (probe, deleted). Noted in the suite's doc comment.
+- Tests: two `PersistenceClientTests` expected `RideStats` without the new `isHealthWorkoutOwed` (finalized owed) → fixed.
+- Full CyclometerTests: 3352 passed, 2 failed: `finishStatsNeverStored` (known, read-count timing, see #650 notes) and
+  `RideDashboardSnapshotTests.testRideDashboardBanner` (passes alone: load).

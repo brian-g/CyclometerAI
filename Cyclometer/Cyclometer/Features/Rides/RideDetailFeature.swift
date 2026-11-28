@@ -72,6 +72,14 @@ struct RideDetailFeature {
         /// The one sheet S15 shows at a time (#538): the full-screen map, the pass list, or Edit.
         @Presents var destination: Destination.State?
 
+        /// Strava records written since launch (#632), laid over the one the stats carried, so the
+        /// Synced To row follows an upload and a reset.
+        @SharedReader(.liveStravaSyncRecords) var liveSyncRecords
+        /// Whether the ride is in Health (#632). Nil until read, after the stats.
+        var healthPresence: HealthWorkoutPresence?
+        /// The Strava activity was found deleted on Strava when the rider tapped it (#632).
+        var isStravaActivityDeleted = false
+
         init(summary: RideListSummary) {
             self.summary = summary
         }
@@ -125,10 +133,59 @@ struct RideDetailFeature {
             return .wholeRide(track: track, stats: stats, unit: unitSystem)
         }
 
+        /// The ride's Strava record as last written: the live one, else the one the stats carried.
+        var stravaRecord: RideSyncRecord? {
+            liveSyncRecords.record(for: summary.id, stored: stats?.stravaRecord)
+        }
+
+        /// S15's Synced To row (#632, UX §S15), nil while it isn't shown: for a ride sent anywhere,
+        /// or one never sent while Strava is connected. Not before the stats: they carry the record.
+        var syncedTo: SyncedTo? {
+            guard let stats else { return nil }
+            let inHealth = stats.isHealthWorkoutOwed || healthPresence == .ours || healthPresence == .otherSource
+            let record = stravaRecord
+            let offersStrava = record != nil || preferences.stravaAccount != nil
+            guard inHealth || record != nil || offersStrava else { return nil }
+            var capsules = [SyncedTo.Capsule(destination: .appleHealth, isSent: inHealth)]
+            if offersStrava {
+                // Filled from the moment it's queued: S15 shows no progress, S12.1 does.
+                capsules.append(SyncedTo.Capsule(destination: .service(.strava), isSent: record.map { $0.status != .failed } ?? false))
+            }
+            let status: SyncedTo.Status? = if record?.status == .failed {
+                .failed(record?.errorMessage ?? "Couldn't upload to Strava")
+            } else if isStravaActivityDeleted && record == nil {
+                .deletedOnStrava
+            } else {
+                nil
+            }
+            return SyncedTo(capsules: capsules, status: status)
+        }
+
         mutating func updateWindExposure() {
             guard let track, let stats else { return }
             windExposure = RideWindExposure(headings: track.movingHeadings, samples: stats.weather)
         }
+    }
+
+    /// S15's Synced To row (#632): one capsule per destination, and what went wrong, if anything.
+    struct SyncedTo: Equatable {
+        struct Capsule: Equatable, Identifiable {
+            let destination: SyncDestination
+            /// Sent, or on its way: drawn filled.
+            let isSent: Bool
+            var id: SyncDestination { destination }
+        }
+
+        /// The status line under the capsules.
+        enum Status: Equatable {
+            /// Strava's own reason, with Retry.
+            case failed(String)
+            /// The activity was deleted on Strava, so the ride can go again.
+            case deletedOnStrava
+        }
+
+        let capsules: [Capsule]
+        let status: Status?
     }
 
     enum Action: Equatable {
@@ -141,6 +198,14 @@ struct RideDetailFeature {
         case vehiclePassesLoaded([VehiclePassEventDTO])
         case weatherAttributionLoaded(WeatherSourceAttribution)
         case healthProfileFetched(restingBPM: Int?, maxBPM: Int?, zoneCeilingsBPM: [Int]?)
+        case healthPresenceLoaded(HealthWorkoutPresence)
+        /// A Synced To capsule (#632): an unfilled one sends the ride there at once, a filled one
+        /// opens it.
+        case syncedToTapped(SyncDestination)
+        /// Retry on the status line under a failed upload.
+        case syncRetryTapped
+        /// The tapped activity is gone from Strava, and its record was removed.
+        case stravaActivityDeleted
         case mapTapped
         case passesTapped
         case editTapped
@@ -155,6 +220,11 @@ struct RideDetailFeature {
             /// The rider saved a new title or notes, for S14 to reload (#538). Other S15s and S20s
             /// read the new title back when they next appear.
             case rideEdited(id: UUID, title: String, notes: String)
+            /// Send the ride to Strava (#632): `AppFeature` queues it.
+            case uploadToStrava(rideId: UUID)
+            /// Write the ride's workout to Apple Health (#632): `AppFeature` marks it owed and
+            /// writes it.
+            case addToAppleHealth(rideId: UUID)
         }
     }
 
@@ -171,6 +241,16 @@ struct RideDetailFeature {
     @Dependency(\.altimeterClient) var altimeterClient
     @Dependency(\.weatherClient) var weatherClient
     @Dependency(\.date) var date
+    @Dependency(\.strava) var strava
+    @Dependency(\.openURL) var openURL
+
+    /// What a filled Apple Health capsule opens. iOS has no public link to one workout, so Health
+    /// itself.
+    static let healthAppURL = URL(string: "x-apple-health://")!
+
+    /// The activity in the Strava app, which `openURL` reports false for when it isn't installed.
+    static func stravaAppURL(activityID: String) -> URL? { URL(string: "strava://activities/\(activityID)") }
+    static func stravaWebURL(activityID: String) -> URL? { URL(string: "https://www.strava.com/activities/\(activityID)") }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -180,6 +260,7 @@ struct RideDetailFeature {
             // the screen as it was — `RouteDetailFeature`'s handling.
             case .task:
                 let id = state.summary.id
+                let startedAt = state.summary.startedAt
                 return .merge(
                     .run { [persistenceClient, altimeterClient] send in
                         do {
@@ -197,7 +278,7 @@ struct RideDetailFeature {
                             await send(.trackLoadFailed)
                         }
                     },
-                    .run { [persistenceClient, weatherClient] send in
+                    .run { [persistenceClient, weatherClient, healthKitClient] send in
                         let stats: RideStats
                         do {
                             stats = try await persistenceClient.fetchRideStats(id)
@@ -216,6 +297,10 @@ struct RideDetailFeature {
                             }
                         }
                         await send(.statsLoaded(stats, route: route))
+                        // Synced To's Apple Health capsule (#632). Needs the end, which the stats carry.
+                        if let endedAt = stats.endedAt {
+                            await send(.healthPresenceLoaded(await healthKitClient.workoutPresence(id, startedAt, endedAt)))
+                        }
                         // Only the attribution, and only for a ride with weather to credit: the weather
                         // itself is the ride's, stored at the time, and a ride without any shows no
                         // Weather section. Offline, the footer still credits it, by name and with the
@@ -284,6 +369,59 @@ struct RideDetailFeature {
                 // An open map sheet colored by heart rate redraws against the zones as they now are.
                 guard case .mapSheet = state.destination else { return .none }
                 return .send(.destination(.presented(.mapSheet(.heartRateZonesChanged(state.heartRateZoneBounds)))))
+
+            case .healthPresenceLoaded(let presence):
+                state.healthPresence = presence
+                return .none
+
+            case .syncedToTapped(let destination):
+                let id = state.summary.id
+                guard let capsule = state.syncedTo?.capsules.first(where: { $0.destination == destination }) else { return .none }
+                switch destination {
+                case .appleHealth where capsule.isSent:
+                    return .run { [openURL] _ in await openURL(Self.healthAppURL) }
+                case .appleHealth:
+                    // Drawn sent at once: the write is owed from here, as S10's close makes it.
+                    state.stats?.isHealthWorkoutOwed = true
+                    return .send(.delegate(.addToAppleHealth(rideId: id)))
+                case .service(.strava) where capsule.isSent:
+                    // Still on its way: nothing to open yet.
+                    guard let activityID = state.stravaRecord?.remoteActivityId else { return .none }
+                    let canTellDeleted = state.preferences.stravaAccount?.grantedScopes.contains(StravaConfig.privateActivitiesScope) ?? false
+                    return .run { [strava, persistenceClient, openURL] send in
+                        // Only a 404 Strava can mean as deleted: without the private-activities scope a
+                        // private activity answers 404 too, and resetting it would upload it twice.
+                        // Offline, or any other failure, it's opened as it stands.
+                        if canTellDeleted, (try? await strava.activityExists(activityID)) == false {
+                            do {
+                                try await persistenceClient.deleteSyncRecord(id, .strava)
+                                logger.notice("ride \(id, privacy: .public)'s Strava activity was deleted there; its record is reset")
+                                await send(.stravaActivityDeleted)
+                                return
+                            } catch {
+                                logger.error("Resetting ride \(id, privacy: .public)'s Strava record failed: \(error.localizedDescription, privacy: .public)")
+                            }
+                        }
+                        if let app = Self.stravaAppURL(activityID: activityID), await openURL(app) { return }
+                        if let web = Self.stravaWebURL(activityID: activityID) { await openURL(web) }
+                    }
+                case .service(.strava):
+                    state.isStravaActivityDeleted = false
+                    return .send(.delegate(.uploadToStrava(rideId: id)))
+                case .service:
+                    return .none
+                }
+
+            case .syncRetryTapped:
+                guard state.stravaRecord?.status == .failed else { return .none }
+                return .send(.delegate(.uploadToStrava(rideId: state.summary.id)))
+
+            case .stravaActivityDeleted:
+                // The live record goes too, from the store's own write; this covers the copy the
+                // stats carried.
+                state.stats?.stravaRecord = nil
+                state.isStravaActivityDeleted = true
+                return .none
 
             case .mapTapped:
                 // The header is drawn only for a ride with a drawable track.

@@ -76,6 +76,12 @@ struct PersistenceClient: Sendable {
     /// Writes a ride's record for one service, replacing the one it had (#630). A no-op for a
     /// ride deleted while its upload ran.
     var saveSyncRecord: @Sendable (UUID, RideSyncRecord) async throws -> Void
+    /// Removes a ride's record for one service, so it reads as never sent: its activity was
+    /// deleted there (#632). A no-op for a ride that's gone.
+    var deleteSyncRecord: @Sendable (UUID, ExternalService) async throws -> Void
+    /// Finished rides whose Strava upload is under way or failed, newest first: S12.1's Uploads
+    /// section (#632).
+    var fetchRidesWithStravaWork: @Sendable () async throws -> [StravaWorkItem]
     /// Inserts confirmed vehicle-pass events in one batch — `VehiclePassDetector`
     /// can legitimately confirm more than one on the same tick (#172, DataModel.md §3.4).
     var appendVehiclePassEvents: @Sendable ([VehiclePassEventDTO]) async throws -> Void
@@ -197,7 +203,15 @@ extension PersistenceClient: DependencyKey {
                 try await ridesWithTrackOnHand(try await stores.rideActor.ridesOwedSync(), rideId: \.rideId, stores: stores)
             },
             fetchSyncRecord: { try await stores.rideActor.syncRecord(id: $0, service: $1) },
-            saveSyncRecord: { try await stores.rideActor.saveSyncRecord(id: $0, record: $1) },
+            saveSyncRecord: { id, record in
+                try await stores.rideActor.saveSyncRecord(id: id, record: record)
+                if record.service == .strava { publishStravaRecord(record, rideId: id) }
+            },
+            deleteSyncRecord: { id, service in
+                try await stores.rideActor.deleteSyncRecord(id: id, service: service)
+                if service == .strava { publishStravaRecord(nil, rideId: id) }
+            },
+            fetchRidesWithStravaWork: { try await stores.rideActor.ridesWithStravaWork() },
             appendVehiclePassEvents: { try await stores.rideActor.appendVehiclePassEvents($0) },
             fetchVehiclePassEvents: { try await stores.rideActor.fetchVehiclePassEvents(rideId: $0) },
             deleteRide: { try await deleteRideLive(id: $0, rideActor: stores.rideActor, container: stores.trackContainer) },
@@ -241,6 +255,12 @@ extension PersistenceClient: DependencyKey {
         ))
     }
 
+    /// Tells the screens of a Strava record written or deleted (#632), once the store has it.
+    private static func publishStravaRecord(_ record: RideSyncRecord?, rideId: UUID) {
+        @Shared(.liveStravaSyncRecords) var live
+        $live.withLock { $0.set(record, for: rideId) }
+    }
+
     static let liveValue = PersistenceClient.live(stores: PersistentStores(
         history: .shared,
         tracks: .shared,
@@ -271,6 +291,8 @@ extension PersistenceClient: DependencyKey {
         fetchRidesOwedSync: { [] },
         fetchSyncRecord: { _, _ in nil },
         saveSyncRecord: { _, _ in },
+        deleteSyncRecord: { _, _ in },
+        fetchRidesWithStravaWork: { [] },
         appendVehiclePassEvents: { _ in },
         fetchVehiclePassEvents: { _ in [] },
         deleteRide: { _ in },

@@ -55,4 +55,9 @@ struct RideStats: Sendable, Equatable {
     /// The conditions recorded during the ride (#151), for S15's Weather section. Empty for a ride
     /// recorded before #151, or one where every forecast failed.
     var weather: [RideWeatherSample] = []
+    /// The ride's Strava record (#632), for S15's Synced To row. Nil when it was never sent.
+    var stravaRecord: RideSyncRecord? = nil
+    /// The rider chose Apple Health and the workout isn't written yet (#277), which S15's Synced
+    /// To row draws as sent (#632).
+    var isHealthWorkoutOwed: Bool = false
 }

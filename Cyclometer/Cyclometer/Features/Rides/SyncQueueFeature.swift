@@ -240,7 +240,9 @@ enum SyncReason {
     static let noUploadScope = "Uploads need “Upload your activities”"
     static let stillProcessing = "Still processing on Strava"
     static let uploadLost = "Strava lost the upload; sending it again"
-    static let rideUnreadable = "Couldn't read the ride"
+    /// Anything else, a store read among them: worded so it blames nothing in particular (#632).
+    /// The error itself is logged by `StravaUploadJob.recordWaiting`.
+    static let unrecognised = "Couldn't upload; trying again"
 }
 
 /// One ride's upload, from wherever its record stands. Every step is written before the next
@@ -354,7 +356,9 @@ private struct StravaUploadJob {
             record.remoteUploadId = nil
             record.errorMessage = outcome.reason
         }
-        logger.notice("strava upload: \(record.status.rawValue, privacy: .public): \(outcome.reason, privacy: .public)")
+        logger.notice(
+            "strava upload: \(record.status.rawValue, privacy: .public): \(outcome.reason, privacy: .public) (\(String(describing: error), privacy: .public))"
+        )
         try? await save(record)
         return outcome.outcome
     }
@@ -429,9 +433,11 @@ struct SyncFailure: Equatable {
             action = .wait
             reason = SyncReason.unreachable
         default:
-            // The ride couldn't be read (a store error, not a missing ride).
+            // Most likely the ride couldn't be read (a store error, not a missing ride), but a
+            // Keychain read or the gzip land here too, so the reason blames neither (#632). The
+            // error itself is in `recordWaiting`'s log line.
             action = .wait
-            reason = SyncReason.rideUnreadable
+            reason = SyncReason.unrecognised
         }
     }
 }

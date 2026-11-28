@@ -28,6 +28,10 @@ struct StravaClient: Sendable {
     var bikes: @Sendable () async throws -> [StravaGear]
     /// Sets an activity's gear, which an upload can't name.
     var setGear: @Sendable (_ activityID: String, _ gearID: String) async throws -> Void
+    /// Whether an activity is still on Strava (`GET /activities/:id`), so S15 can tell one the
+    /// rider deleted there (#632): false on a 404. A private activity answers 404 too without
+    /// `activity:read_all`, so the caller checks only with that scope granted.
+    var activityExists: @Sendable (_ activityID: String) async throws -> Bool
 }
 
 extension StravaClient: DependencyKey {
@@ -51,7 +55,8 @@ extension StravaClient: DependencyKey {
         routeGPX: { _ in throw StravaAuthError.notConnected },
         athlete: { throw StravaAuthError.notConnected },
         bikes: { throw StravaAuthError.notConnected },
-        setGear: { _, _ in throw StravaAuthError.notConnected }
+        setGear: { _, _ in throw StravaAuthError.notConnected },
+        activityExists: { _ in throw StravaAuthError.notConnected }
     )
 
     static let previewValue = StravaClient.mock()

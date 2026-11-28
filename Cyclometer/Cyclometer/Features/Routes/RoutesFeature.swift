@@ -180,6 +180,10 @@ struct RoutesFeature {
             /// A ride's title or notes changed in an S15 on this tab's stack (#538), for
             /// `AppFeature` to reload S14 on the Rides tab.
             case rideEdited
+            /// Send a ride to Strava, or write its workout to Apple Health, from S15's Synced To
+            /// row on this tab's stack (#632). S14's delegates of the same names.
+            case uploadToStrava(rideId: UUID)
+            case addToAppleHealth(rideId: UUID)
             /// The rider asked to reset the history store, which failed to open (#206). S14's
             /// delegate of the same name.
             case resetHistoryRequested
@@ -516,6 +520,12 @@ struct RoutesFeature {
             // `AppFeature`'s to reload. S20 reads its Previous Rides back when it next appears.
             case .path(.element(id: _, action: .ride(.delegate(.rideEdited)))):
                 return .send(.delegate(.rideEdited))
+
+            case .path(.element(id: _, action: .ride(.delegate(.uploadToStrava(let id))))):
+                return .send(.delegate(.uploadToStrava(rideId: id)))
+
+            case .path(.element(id: _, action: .ride(.delegate(.addToAppleHealth(let id))))):
+                return .send(.delegate(.addToAppleHealth(rideId: id)))
 
             case .alert, .path, .delegate:
                 return .none

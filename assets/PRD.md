@@ -1104,7 +1104,7 @@ export. A deletion on Strava must show in the app within 48 hours (§6.3), and r
   An upload Strava rejects as a duplicate of an existing activity is recorded as synced, with that activity's id.
   This is also why the Health workout is a Sync To choice rather than automatic (UX.md §S10)
 - Uploads outlive S10: they run in an app-scoped queue, a ride still pending at quit resumes at the next launch, and
-  a failed one is retried from S15's Synced To row or S14's Sync swipe. Nothing uploads without the rider's choice
+  a failed one is retried from S15's Synced To row, S14's Sync swipe or S12.1's Uploads section (#632). Nothing uploads without the rider's choice
 - Not synced back: renaming or deleting a ride in Cyclometer after upload leaves the Strava activity as it is
 
 **Segments on Ride Detail (S15).** For a ride synced to Strava, `GET /api/v3/activities/:id?include_all_efforts=true`

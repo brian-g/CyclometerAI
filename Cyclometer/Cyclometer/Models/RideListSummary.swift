@@ -11,6 +11,9 @@ struct RideListSummary: Sendable, Equatable, Identifiable {
     var startedAt: Date
     var distanceMeters: Double
     var durationSeconds: TimeInterval
+    /// Where the ride's Strava upload stands, nil when it was never sent (#632): whether S14
+    /// offers its Sync swipe.
+    var stravaSyncStatus: SyncStatus? = nil
 }
 
 extension RideListSummary {

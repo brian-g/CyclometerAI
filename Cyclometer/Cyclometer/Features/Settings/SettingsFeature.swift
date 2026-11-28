@@ -245,6 +245,8 @@ struct SettingsFeature {
             case liveActivityToggled
             /// S12.1 connected or reconnected Strava: `AppFeature` resumes the upload queue (#630).
             case stravaConnected
+            /// Retry on a failed upload in S12.1's Uploads section (#632): `AppFeature` queues it.
+            case uploadToStrava(rideId: UUID)
         }
     }
     var body: some ReducerOf<Self> {
@@ -413,6 +415,8 @@ struct SettingsFeature {
                 return .none
             case .path(.element(id: _, action: .stravaAccount(.delegate(.connected)))):
                 return .send(.delegate(.stravaConnected))
+            case let .path(.element(id: _, action: .stravaAccount(.delegate(.uploadToStrava(rideId))))):
+                return .send(.delegate(.uploadToStrava(rideId: rideId)))
             case let .path(.element(id: id, action: .stravaAccount(.delegate(.disconnectConfirmed)))):
                 // Pops first, and disconnects here rather than in S12.1, whose effects end with it:
                 // the revoke is a network call, and the account is gone before it answers.

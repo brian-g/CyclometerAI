@@ -636,6 +636,25 @@ struct AppFeature {
                 guard state.activeRide != nil else { return .none }
                 return .send(.activeRide(.liveActivity(.preferenceChanged)))
 
+            // S15's Synced To row, on either tab's stack, S14's Sync swipe, and S12.1's Retry (#632).
+            // The queue's `inFlight` makes a second tap while the first is running a no-op.
+            case .rides(.delegate(.uploadToStrava(let id))), .routes(.delegate(.uploadToStrava(let id))),
+                 .settings(.delegate(.uploadToStrava(let id))):
+                return .send(.syncQueue(.enqueue(rideId: id)))
+
+            // S15's grey Apple Health capsule (#632): owed, then written as S10's close writes it.
+            // A failed write stays owed and is retried at the next launch or S10 close (#277).
+            case .rides(.delegate(.addToAppleHealth(let id))), .routes(.delegate(.addToAppleHealth(let id))):
+                return .run { [persistenceClient] _ in
+                    do {
+                        try await persistenceClient.setHealthWorkoutOwed(id, true)
+                    } catch {
+                        // Logged in RidePersistenceActor.
+                        return
+                    }
+                    await RideHealthWorkout.backfill()
+                }
+
             case .settings(.delegate(.stravaConnected)):
                 // A connect, or a Reconnect that granted the upload scope, sends what was waiting on
                 // it (#630); `resume` holds without the scope. Uploads waiting on Strava stay pending

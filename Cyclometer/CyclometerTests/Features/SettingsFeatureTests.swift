@@ -725,4 +725,16 @@ struct SettingsFeatureTests {
         await store.send(.path(.element(id: 0, action: .stravaAccount(.delegate(.connected)))))
         await store.receive(\.delegate.stravaConnected)
     }
+
+    @Test("Retry in S12.1's Uploads section reaches the app, which queues the ride (#632)")
+    func uploadRetryTellsApp() async {
+        let store = makeStore()
+        let rideId = UUID()
+
+        await store.send(.path(.push(id: 0, state: .stravaAccount(AccountsFeature.State())))) {
+            $0.path[id: 0] = .stravaAccount(AccountsFeature.State())
+        }
+        await store.send(.path(.element(id: 0, action: .stravaAccount(.delegate(.uploadToStrava(rideId: rideId))))))
+        await store.receive(.delegate(.uploadToStrava(rideId: rideId)))
+    }
 }
