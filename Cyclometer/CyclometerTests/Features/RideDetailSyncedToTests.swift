@@ -33,7 +33,7 @@ struct RideDetailSyncedToTests {
     private func makeStore(
         stats: RideStats? = Self.stats(),
         account: ConnectedService? = Self.account(),
-        healthPresence: HealthWorkoutPresence? = HealthWorkoutPresence.none,
+        healthPresence: HealthWorkoutPresence? = HealthWorkoutPresence.absent,
         configure: (inout RideDetailFeature.State) -> Void = { _ in },
         dependencies: (inout DependencyValues) -> Void = { _ in }
     ) -> TestStoreOf<RideDetailFeature> {
@@ -55,6 +55,9 @@ struct RideDetailSyncedToTests {
                 $0.defaultInMemoryStorage = memory
                 $0.persistenceClient = .mock()
                 $0.strava = .mock()
+                // Never advanced: the deleted-on-Strava check's timeout doesn't fire, so the mock's
+                // answer decides.
+                $0.continuousClock = TestClock()
                 $0.openURL = OpenURLEffect { _ in Issue.record("opened a URL"); return true }
                 dependencies(&$0)
             }
@@ -100,7 +103,7 @@ struct RideDetailSyncedToTests {
     }
 
     @Test("Apple Health is filled for our workout, another source's, or one owed", arguments: [(HealthWorkoutPresence?, Bool)]([
-        (.ours, false), (.otherSource, false), (HealthWorkoutPresence.none, true), (nil, true),
+        (.ours, false), (.otherSource, false), (HealthWorkoutPresence.absent, true), (nil, true),
     ]))
     func healthFilled(_ presence: HealthWorkoutPresence?, _ owed: Bool) {
         let store = makeStore(stats: Self.stats(healthOwed: owed), account: nil, healthPresence: presence)
@@ -210,6 +213,23 @@ struct RideDetailSyncedToTests {
             $0.openURL = OpenURLEffect { url in opened.withValue { $0.append(url) }; return true }
         }
         await store.send(.syncedToTapped(.service(.strava)))
+        await store.finish()
+        #expect(opened.value == [URL(string: "strava://activities/987")!])
+    }
+
+    @Test("A check that doesn't answer gives up after a few seconds, and the activity opens as it stands")
+    func slowCheckOpens() async {
+        let opened = LockIsolated<[URL]>([])
+        let clock = TestClock()
+        let store = makeStore(stats: Self.stats(strava: Self.synced)) {
+            var strava = StravaClient.mock()
+            strava.activityExists = { _ in try await Task.never() }
+            $0.strava = strava
+            $0.continuousClock = clock
+            $0.openURL = OpenURLEffect { url in opened.withValue { $0.append(url) }; return true }
+        }
+        await store.send(.syncedToTapped(.service(.strava)))
+        await clock.advance(by: RideDetailFeature.stravaActivityCheckTimeout)
         await store.finish()
         #expect(opened.value == [URL(string: "strava://activities/987")!])
     }

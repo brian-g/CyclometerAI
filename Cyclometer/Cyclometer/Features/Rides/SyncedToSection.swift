@@ -43,10 +43,9 @@ struct SyncedToSection: View {
 
     private var capsules: some View {
         ForEach(syncedTo.capsules) { capsule in
-            SyncToCapsule(destination: capsule.destination, isFilled: capsule.isSent, size: .compact) {
+            SyncToCapsule(destination: capsule.destination, isFilled: capsule.isSent, size: .compact, hint: capsule.hint) {
                 tap(capsule.destination)
             }
-            .accessibilityHint(capsule.hint)
         }
     }
 }
@@ -97,13 +96,13 @@ private struct StatusLine: View {
 
 private extension RideDetailFeature.SyncedTo.Capsule {
     /// What a tap does, for VoiceOver: the capsule's look alone doesn't say.
-    var hint: String {
+    var hint: Text? {
         switch (destination, isSent) {
-        case (.appleHealth, true): "Opens Health"
-        case (.appleHealth, false): "Adds this ride to Apple Health"
-        case (.service(.strava), true): "Opens the ride on Strava"
-        case (.service(.strava), false): "Uploads this ride to Strava"
-        case (.service, _): ""
+        case (.appleHealth, true): Text("Opens Health")
+        case (.appleHealth, false): Text("Adds this ride to Apple Health")
+        case (.service(.strava), true): Text("Opens the ride on Strava")
+        case (.service(.strava), false): Text("Uploads this ride to Strava")
+        case (.service, _): nil
         }
     }
 }

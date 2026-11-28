@@ -152,7 +152,7 @@ struct RideDetailFeature {
                 capsules.append(SyncedTo.Capsule(destination: .service(.strava), isSent: record.map { $0.status != .failed } ?? false))
             }
             let status: SyncedTo.Status? = if record?.status == .failed {
-                .failed(record?.errorMessage ?? "Couldn't upload to Strava")
+                .failed(record?.errorMessage ?? String(localized: "Couldn't upload to Strava"))
             } else if isStravaActivityDeleted && record == nil {
                 .deletedOnStrava
             } else {
@@ -243,6 +243,14 @@ struct RideDetailFeature {
     @Dependency(\.date) var date
     @Dependency(\.strava) var strava
     @Dependency(\.openURL) var openURL
+    @Dependency(\.continuousClock) var clock
+
+    private enum CancelID { case openStravaActivity }
+
+    /// How long a filled Strava capsule waits on the deleted-on-Strava check before opening the
+    /// activity as it stands: a weak connection would otherwise hold the tap for the session's
+    /// 60 s timeout.
+    static let stravaActivityCheckTimeout: Duration = .seconds(3)
 
     /// What a filled Apple Health capsule opens. iOS has no public link to one workout, so Health
     /// itself.
@@ -251,6 +259,21 @@ struct RideDetailFeature {
     /// The activity in the Strava app, which `openURL` reports false for when it isn't installed.
     static func stravaAppURL(activityID: String) -> URL? { URL(string: "strava://activities/\(activityID)") }
     static func stravaWebURL(activityID: String) -> URL? { URL(string: "https://www.strava.com/activities/\(activityID)") }
+
+    /// True only when Strava answers 404 within `stravaActivityCheckTimeout`. A failure, a slow
+    /// answer or a cancellation is false, so the activity opens as it stands.
+    private static func isDeletedOnStrava(_ activityID: String, strava: StravaClient, clock: any Clock<Duration>) async -> Bool {
+        await withTaskGroup(of: Bool?.self) { group in
+            group.addTask { (try? await strava.activityExists(activityID)).map { !$0 } }
+            group.addTask {
+                try? await clock.sleep(for: stravaActivityCheckTimeout)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? false
+        }
+    }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -297,17 +320,24 @@ struct RideDetailFeature {
                             }
                         }
                         await send(.statsLoaded(stats, route: route))
-                        // Synced To's Apple Health capsule (#632). Needs the end, which the stats carry.
-                        if let endedAt = stats.endedAt {
-                            await send(.healthPresenceLoaded(await healthKitClient.workoutPresence(id, startedAt, endedAt)))
+                        // Both need the stats, and neither waits on the other.
+                        await withDiscardingTaskGroup { group in
+                            // Synced To's Apple Health capsule (#632). Needs the end, which the stats carry.
+                            if let endedAt = stats.endedAt {
+                                group.addTask {
+                                    await send(.healthPresenceLoaded(await healthKitClient.workoutPresence(id, startedAt, endedAt)))
+                                }
+                            }
+                            // Only the attribution, and only for a ride with weather to credit: the weather
+                            // itself is the ride's, stored at the time, and a ride without any shows no
+                            // Weather section. Offline, the footer still credits it, by name and with the
+                            // fixed legal link. Failures are logged in WeatherClient.
+                            if !stats.weather.isEmpty {
+                                group.addTask {
+                                    await send(.weatherAttributionLoaded((try? await weatherClient.attribution()) ?? .offline))
+                                }
+                            }
                         }
-                        // Only the attribution, and only for a ride with weather to credit: the weather
-                        // itself is the ride's, stored at the time, and a ride without any shows no
-                        // Weather section. Offline, the footer still credits it, by name and with the
-                        // fixed legal link. Failures are logged in WeatherClient.
-                        guard !stats.weather.isEmpty else { return }
-                        let attribution = (try? await weatherClient.attribution()) ?? .offline
-                        await send(.weatherAttributionLoaded(attribution))
                     },
                     .run { [persistenceClient] send in
                         do {
@@ -388,11 +418,11 @@ struct RideDetailFeature {
                     // Still on its way: nothing to open yet.
                     guard let activityID = state.stravaRecord?.remoteActivityId else { return .none }
                     let canTellDeleted = state.preferences.stravaAccount?.grantedScopes.contains(StravaConfig.privateActivitiesScope) ?? false
-                    return .run { [strava, persistenceClient, openURL] send in
+                    return .run { [strava, persistenceClient, openURL, clock] send in
                         // Only a 404 Strava can mean as deleted: without the private-activities scope a
                         // private activity answers 404 too, and resetting it would upload it twice.
-                        // Offline, or any other failure, it's opened as it stands.
-                        if canTellDeleted, (try? await strava.activityExists(activityID)) == false {
+                        // Offline, slow, or any other failure, it's opened as it stands.
+                        if canTellDeleted, await Self.isDeletedOnStrava(activityID, strava: strava, clock: clock) {
                             do {
                                 try await persistenceClient.deleteSyncRecord(id, .strava)
                                 logger.notice("ride \(id, privacy: .public)'s Strava activity was deleted there; its record is reset")
@@ -402,9 +432,14 @@ struct RideDetailFeature {
                                 logger.error("Resetting ride \(id, privacy: .public)'s Strava record failed: \(error.localizedDescription, privacy: .public)")
                             }
                         }
+                        // A cancelled check reads as "not deleted": popped, or replaced by a second
+                        // tap, nothing opens behind the rider's back.
+                        guard !Task.isCancelled else { return }
                         if let app = Self.stravaAppURL(activityID: activityID), await openURL(app) { return }
+                        guard !Task.isCancelled else { return }
                         if let web = Self.stravaWebURL(activityID: activityID) { await openURL(web) }
                     }
+                    .cancellable(id: CancelID.openStravaActivity, cancelInFlight: true)
                 case .service(.strava):
                     state.isStravaActivityDeleted = false
                     return .send(.delegate(.uploadToStrava(rideId: id)))

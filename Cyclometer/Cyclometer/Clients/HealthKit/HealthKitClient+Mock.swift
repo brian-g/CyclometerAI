@@ -17,7 +17,7 @@ extension HealthKitClient {
         onSaveWorkout: @escaping @Sendable (RideWorkout) async throws -> Void = { _ in },
         onDeleteWorkout: @escaping @Sendable (UUID) async throws -> Void = { _ in },
         isWorkoutSharingAllowed: Bool = true,
-        workoutPresence: HealthWorkoutPresence = .none
+        workoutPresence: HealthWorkoutPresence = .absent
     ) -> HealthKitClient {
         HealthKitClient(
             requestAuthorization:  onRequestAuthorization,

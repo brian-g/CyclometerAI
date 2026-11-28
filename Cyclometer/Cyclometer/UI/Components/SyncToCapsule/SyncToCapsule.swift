@@ -18,6 +18,9 @@ struct SyncToCapsule: View {
     let isFilled: Bool
     var needsReconnect = false
     var size = Size.regular
+    /// What a tap does, for VoiceOver, when the capsule's look alone doesn't say. A capsule waiting
+    /// on Reconnect says so instead.
+    var hint: Text?
     let action: () -> Void
 
     /// The mark's height: Strava's is an image, which doesn't size itself to the text as a symbol does.
@@ -54,7 +57,7 @@ struct SyncToCapsule: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(filled ? .isSelected : [])
-        .accessibilityHint(needsReconnect ? "Reconnects your account" : "")
+        .accessibilityHint(needsReconnect ? Text("Reconnects your account") : hint ?? Text(verbatim: ""))
     }
 
     @ViewBuilder private var mark: some View {

@@ -3552,3 +3552,8 @@ Review (2026-11-27):
 - Tests: two `PersistenceClientTests` expected `RideStats` without the new `isHealthWorkoutOwed` (finalized owed) → fixed.
 - Full CyclometerTests: 3352 passed, 2 failed: `finishStatsNeverStored` (known, read-count timing, see #650 notes) and
   `RideDashboardSnapshotTests.testRideDashboardBanner` (passes alone: load).
+- /code-review --fix (2026-11-27): 5 fixed (Strava capsule check times out at 3 s, cancellable, no open after
+  cancel; Health read and weather attribution side by side; S12.1 spinner only without a waiting reason; capsule hint
+  as `Text`, fallback reason localized; `HealthWorkoutPresence.none` → `.absent`). Skipped, asked Brian: account
+  switch reads old rides as deleted (needs athlete id on `RideSyncRecord`); Synced To label/capsule baseline alignment.
+  Full CyclometerTests: 3354 passed, 1 failed (`finishStatsNeverStored`, known).

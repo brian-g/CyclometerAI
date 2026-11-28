@@ -111,7 +111,8 @@ private struct UploadRow: View {
                     .buttonStyle(.borderless)
                     .fontWeight(.semibold)
             case .uploading, .processing:
-                ProgressView()
+                // Not beside a reason it waits on ("Offline"): nothing is running until the next resume.
+                if upload.record.errorMessage == nil { ProgressView() }
             case .pending, .synced:
                 EmptyView()
             }

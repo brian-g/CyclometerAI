@@ -44,7 +44,7 @@ final class RideDetailSyncedToSnapshotTests: XCTestCase {
     /// The row for a ride with `record` on Strava and `presence` in Health.
     private func row(
         _ record: RideSyncRecord?,
-        presence: HealthWorkoutPresence = .none,
+        presence: HealthWorkoutPresence = .absent,
         connected: Bool = true,
         isStravaActivityDeleted: Bool = false
     ) -> some View {

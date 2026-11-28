@@ -87,7 +87,7 @@ struct HealthKitClient {
     var isWorkoutSharingAllowed: @Sendable () -> Bool
     /// Whether the ride is in Health (#632), for S15's Apple Health capsule: our workout, found by
     /// its sync identifier, or another source's cycling workout over the same time, which
-    /// `saveWorkout` skipped ours for. `.none` when neither is there, and when the read fails or
+    /// `saveWorkout` skipped ours for. `.absent` when neither is there, and when the read fails or
     /// isn't allowed: the capsule is only drawn unfilled.
     var workoutPresence: @Sendable (_ rideId: UUID, _ start: Date, _ end: Date) async -> HealthWorkoutPresence
 }
@@ -98,7 +98,8 @@ enum HealthWorkoutPresence: Equatable, Sendable {
     case ours
     /// Another source recorded a cycling workout over the ride, such as an Apple Watch.
     case otherSource
-    case none
+    /// Neither. Not `none`, which `HealthWorkoutPresence?` would read as `Optional.none`.
+    case absent
 }
 
 extension HealthKitClient: DependencyKey {
@@ -140,7 +141,7 @@ extension HealthKitClient: DependencyKey {
         deleteWorkout:         { _ in },
         // Matches `saveWorkout`'s no-op succeeding.
         isWorkoutSharingAllowed: { true },
-        workoutPresence:       { _, _, _ in .none }
+        workoutPresence:       { _, _, _ in .absent }
     )
 }
 
@@ -570,9 +571,9 @@ extension HealthKitClient {
             if try await !ours.result(for: store).isEmpty { return .ours }
         } catch {
             logger.notice("workout lookup failed for ride \(rideId, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return .none
+            return .absent
         }
-        return await overlappingCyclingWorkout(rideId, start, end, store) == nil ? .none : .otherSource
+        return await overlappingCyclingWorkout(rideId, start, end, store) == nil ? .absent : .otherSource
     }
 }
 
